@@ -1,0 +1,26 @@
+meta {
+  name: Create a user
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{host}}/users.json
+  body: json
+  auth: inherit
+}
+
+headers {
+  Authorization: Bearer {{jwt_token}}
+  Accept: application/json
+}
+
+body:json {
+  {
+    "username": "grace@passbolt.com",
+    "profile": {
+      "first_name": "Grace",
+      "last_name": "Hopper"
+    }
+  }
+}

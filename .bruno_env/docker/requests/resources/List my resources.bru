@@ -1,0 +1,16 @@
+meta {
+  name: List my resources
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{host}}/resources.json
+  body: none
+  auth: inherit
+}
+
+headers {
+  Authorization: Bearer {{jwt_token}}
+  Accept: application/json
+}

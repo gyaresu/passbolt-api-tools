@@ -1,0 +1,16 @@
+meta {
+  name: Dry run a user deletion (WIP)
+  type: http
+  seq: 7
+}
+
+delete {
+  url: {{host}}/users/{{users_user_id}}/dry-run.json
+  body: json
+  auth: inherit
+}
+
+headers {
+  Authorization: Bearer {{jwt_token}}
+  Accept: application/json
+}

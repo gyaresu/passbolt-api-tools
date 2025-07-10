@@ -1,0 +1,10 @@
+# Ignore generated authentication/session files
+cookies.txt
+headers.txt
+token.txt 
+test
+# Bruno
+# Python
+__pycache__
+# macOS
+.DS_Store

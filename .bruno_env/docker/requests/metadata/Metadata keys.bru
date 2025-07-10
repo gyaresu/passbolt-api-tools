@@ -1,0 +1,16 @@
+meta {
+  name: Metadata keys
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{host}}/metadata/keys.json
+  body: none
+  auth: inherit
+}
+
+headers {
+  Authorization: Bearer {{jwt_token}}
+  Accept: application/json
+}

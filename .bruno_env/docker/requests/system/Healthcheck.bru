@@ -1,0 +1,16 @@
+meta {
+  name: Healthcheck
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{host}}/healthcheck.json
+  body: json
+  auth: inherit
+}
+
+headers {
+  Authorization: Bearer {{jwt_token}}
+  Accept: application/json
+}

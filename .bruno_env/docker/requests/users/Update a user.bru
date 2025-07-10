@@ -1,0 +1,28 @@
+meta {
+  name: Update a user
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{host}}/users/{{users_user_id}}.json
+  body: json
+  auth: inherit
+}
+
+headers {
+  Authorization: Bearer {{jwt_token}}
+  Accept: application/json
+}
+
+body:json {
+  {
+    // role_id comes from GET Roles
+    // 7de1be... is admin for this passbolt instance.
+    // Each instance will have its own UUID
+    "role_id": "7de1be19-3a2c-45a9-96be-8c44a048be9a",
+    "profile": {
+      "first_name": "Grace"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "version": "1",
+  "name": "docker",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ],
+  "size": 0.0008592605590820312,
+  "filesCount": 1,
+  "presets": {
+    "requestType": "http",
+    "requestUrl": ""
+  }
+}

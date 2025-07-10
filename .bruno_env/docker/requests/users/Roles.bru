@@ -1,0 +1,16 @@
+meta {
+  name: Roles
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{host}}/roles.json
+  body: json
+  auth: inherit
+}
+
+headers {
+  Authorization: Bearer {{jwt_token}}
+  Accept: application/json
+}

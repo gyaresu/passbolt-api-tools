@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Decrypt Passbolt v5 resource metadata using Ada's private key and the Passbolt API.
+Decrypt Passbolt v5 resource metadata and password using Ada's private key and the Passbolt API.
 Handles both private (user_key) and shared (shared_key) resource metadata.
 """
 import requests
@@ -143,8 +143,10 @@ def main():
 
     import_private_key(ADA_PRIVATE_KEY_PATH)
 
+    # Decrypt metadata
     if metadata_key_type == "user_key":
         cleartext = gpg_decrypt_message(metadata, ADA_PRIVATE_KEY_PASSPHRASE)
+        secret_decrypt_passphrase = ADA_PRIVATE_KEY_PASSPHRASE
     elif metadata_key_type == "shared_key":
         keys_response = api_get("/metadata/keys.json?contain[metadata_private_keys]=1", jwt_token=jwt_token)
         key_entry = None
@@ -187,14 +189,23 @@ def main():
             subprocess.run([
                 "gpg", "--batch", "--yes", "--delete-secret-keys", shared_fpr
             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        secret_decrypt_passphrase = ADA_PRIVATE_KEY_PASSPHRASE
     else:
         raise Exception(f"Unknown metadata_key_type: {metadata_key_type}")
+
+    # Fetch and decrypt the secret (password)
+    secret_response = api_get(f"/secrets/resource/{RESOURCE_ID}.json", jwt_token=jwt_token)
+    secret_data = secret_response.get('body', secret_response)
+    encrypted_secret = secret_data.get('data')
+    decrypted_secret = gpg_decrypt_message(encrypted_secret, secret_decrypt_passphrase)
 
     print("\n--- Decrypted Metadata ---")
     try:
         print(json.dumps(json.loads(cleartext), indent=2))
     except Exception:
         print(cleartext)
+    print("\n--- Decrypted Secret (Password) ---")
+    print(decrypted_secret.strip())
 
 if __name__ == "__main__":
     main() 

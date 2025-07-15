@@ -219,7 +219,28 @@ This script fetches all resources Ada can access from a Passbolt v5 instance, de
    - `PASSBOLT_URL` (default: `https://passbolt.local`)
    - `ADA_PRIVATE_KEY_PATH` (default: `ada_private.key`)
    - `ADA_PRIVATE_KEY_PASSPHRASE` (default: `ada@passbolt.com`)
-   - `PASSBOLT_USER_ID` and `PASSBOLT_USER_FPR` (see your Passbolt user and key info)
+   - `PASSBOLT_USER_ID` and `PASSBOLT_USER_FPR` (see below)
+
+   **How to get your `PASSBOLT_USER_ID` and `PASSBOLT_USER_FPR`:**
+   
+   - **PASSBOLT_USER_ID**: This is your unique user ID in Passbolt. To find it:
+     1. Log in to your Passbolt web interface.
+     2. Go to **Users & Groups** (or your profile/settings).
+     3. Click on your user entry.
+     4. Look at the URL in your browser. It will look like:
+        `https://your-passbolt-instance/app/users/view/8599f576-9775-4ebc-a7cb-d102de1d46dd`
+        The long string at the end is your user ID.
+   
+   - **PASSBOLT_USER_FPR**: This is your GPG key fingerprint. To find it:
+     1. Run `gpg --list-secret-keys --keyid-format LONG` on your machine.
+     2. Find the entry for your Passbolt key. The fingerprint is the long hexadecimal string (e.g., `03F60E958F4CB29723ACDF761353B5B15D9B054F`).
+     3. If you have your private key as a file, you may need to import it first: `gpg --import /path/to/your_private.key`.
+
+   | Variable              | How to Obtain                                                      |
+   |----------------------|--------------------------------------------------------------------|
+   | `PASSBOLT_USER_ID`   | From Passbolt web UI user profile URL                              |
+   | `PASSBOLT_USER_FPR`  | From `gpg --list-secret-keys` output for your key                  |
+
 4. Install dependencies:
    ```bash
    pip install requests tabulate

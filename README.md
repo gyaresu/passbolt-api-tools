@@ -1,19 +1,17 @@
 # Passbolt API Examples
 
-This repository contains example scripts demonstrating different authentication methods for the Passbolt API, with a focus on JWT authentication and Bruno API client integration.
+## Quick Reference
 
-## Features
-
-- JWT authentication with Passbolt API
-- Support for both local GPG key files and GPG keyring keys
-- Automatic CSRF token handling
-- Secure challenge-response authentication
-- Token management and storage
-- API testing capabilities
-- Multiple output formats (Bruno, curl)
-- Debug mode for troubleshooting
-- Temporary file cleanup
-- Automatic JWT token refresh
+- **JWT authentication and API testing:**
+  `python3 jwt_auth_with_api_test.py`
+- **JWT authentication with Bruno support:**
+  `python3 jwt_api_with_bruno_support.py`
+- **Automatic JWT token refresh:**
+  `python3 loop_refresh_jwt_token.py`
+- **Legacy GPG authentication (shell):**
+  `./passbolt-gpgauth-example.sh`
+- **Decrypt and display all resource metadata/passwords (table):**
+  `python3 passbolt_api_metadata_client.py`
 
 ## Prerequisites
 
@@ -201,6 +199,58 @@ A legacy example (`passbolt-gpgauth-example.sh`) demonstrating:
 ```bash
 ./passbolt-gpgauth-example.sh
 ```
+
+### 5. Decrypt and Display All Resource Metadata (passbolt_api_metadata_client.py)
+
+This script fetches all resources Ada can access from a Passbolt v5 instance, decrypts their metadata and passwords, and displays the results in a table. It is intended for educational/demo use with test data.
+
+#### Requirements
+- Python 3.6+
+- [requests](https://pypi.org/project/requests/) (`pip install requests`)
+- [tabulate](https://pypi.org/project/tabulate/) (`pip install tabulate`)
+- GPG 2.1+
+- Ada's GPG private key (exported from Passbolt)
+- Ada's GPG key passphrase
+
+#### Setup
+1. Export Ada's private key from Passbolt (see GPG Key Setup above).
+2. Place the key file (e.g., `ada_private.key`) in the project directory.
+3. Edit the script to set:
+   - `PASSBOLT_URL` (default: `https://passbolt.local`)
+   - `ADA_PRIVATE_KEY_PATH` (default: `ada_private.key`)
+   - `ADA_PRIVATE_KEY_PASSPHRASE` (default: `ada@passbolt.com`)
+   - `PASSBOLT_USER_ID` and `PASSBOLT_USER_FPR` (see your Passbolt user and key info)
+4. Install dependencies:
+   ```bash
+   pip install requests tabulate
+   ```
+5. Ensure GPG is installed and available in your PATH.
+
+#### Usage
+Run the script:
+```bash
+python3 passbolt_api_metadata_client.py
+```
+
+The script will:
+- Authenticate to Passbolt using JWT and Ada's private key
+- Fetch all resources Ada can access
+- Decrypt each resource's metadata and password
+- Display a table with columns:
+  - Name, ID, Password, TOTP, Custom Fields, Username, URL, Description, Icon
+
+**Sample Output (truncated for readability):**
+```
++-----------------------+----------+--------------------+----------------+-------------------------------+
+| Name                  | ID       | Password           | Username       | URL                           |
++=======================+==========+====================+================+===============================+
+| e2ee test             | 5c90c883 | N$=hY=K6v@h,&f)iT9 | edith          | https://example.com, ...      |
++-----------------------+----------+--------------------+----------------+-------------------------------+
+```
+*Table truncated for readability. Actual output includes TOTP, Custom Fields, Description, Icon, etc.*
+
+- If a resource cannot be decrypted, it will be skipped.
+- The script is intended for local/test Passbolt instances and should not be used with real data.
 
 ## Supporting Tools
 

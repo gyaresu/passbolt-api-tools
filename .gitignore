@@ -8,3 +8,4 @@ test
 __pycache__
 # macOS
 .DS_Store
+passbolt-pro-api

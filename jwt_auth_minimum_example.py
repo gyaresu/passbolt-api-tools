@@ -29,7 +29,7 @@ import shutil
 # These values would typically come from environment variables or a config file
 # in a production environment. They are hardcoded here for demonstration.
 API_URL = "https://passbolt.local"  # Your Passbolt instance URL
-USER_ID = "8599f576-9775-4ebc-a7cb-d102de1d46dd"  # Ada Lovelace's user ID from Passbolt interface
+USER_ID = "0460d687-f393-490a-b710-79f333aae3b1"
 PRIVATE_KEY_PATH = "ada_private.key"  # Path to Ada's GPG private key
 KEY_PASSPHRASE = "ada@passbolt.com"  # Ada's GPG key passphrase
 

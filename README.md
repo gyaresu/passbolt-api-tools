@@ -6,8 +6,12 @@
   `python3 jwt_auth_with_api_test.py`
 - **JWT authentication with Bruno support:**
   `python3 jwt_api_with_bruno_support.py`
+- **JWT authentication (minimal example):**
+  `python3 jwt_auth_minimum_example.py`
 - **Automatic JWT token refresh:**
   `python3 loop_refresh_jwt_token.py`
+- **Group management (create groups and add users):**
+  `python3 group_update.py`
 - **Legacy GPG authentication (shell):**
   `./passbolt-gpgauth-example.sh`
 - **Decrypt and display all resource metadata/passwords (table):**
@@ -34,6 +38,15 @@ To use these scripts, you'll need your GPG private key from Passbolt:
 
 The exported key file and fingerprint will be used in the examples below.
 
+### Getting Your User ID and Fingerprint
+For scripts that require your Passbolt user ID and GPG fingerprint:
+
+**PASSBOLT_USER_ID**: Your unique user ID in Passbolt. Log in to your Passbolt web interface, go to **Users & Groups**, click on your user entry, and look at the URL in your browser. It will look like `https://your-passbolt-instance/app/users/view/8599f576-9775-4ebc-a7cb-d102de1d46dd` - the long string at the end is your user ID.
+
+**GPG_FINGERPRINT**: Your GPG key fingerprint. Log into your Passbolt instance, click on your avatar in the top right, click "Key Inspector", and you'll see your fingerprint in the Keys section (e.g., `03F60E958F4CB29723ACDF761353B5B15D9B054F`).
+
+**Note**: Some scripts (like `jwt_api_with_bruno_support.py` and `jwt_auth_with_api_test.py`) require the private key to be imported into your local GPG keyring for validation. Export your private key from Passbolt, import it with `gpg --import your_private_key.asc`, and the script will validate the fingerprint exists in your keyring before proceeding.
+
 ### Python Environment
 ```bash
 # Create a new virtual environment
@@ -55,6 +68,7 @@ The scripts require the following external packages:
 requests>=2.32.3
 python-dotenv>=1.0.0
 pyyaml>=6.0.1
+tabulate>=0.9.0
 ```
 
 All other dependencies are part of Python's standard library.
@@ -62,7 +76,7 @@ All other dependencies are part of Python's standard library.
 ## Examples
 
 ### 1. JWT Authentication with API Testing
-A comprehensive example (`jwt_auth_with_api_test.py`) showing:
+Script (`jwt_auth_with_api_test.py`) showing:
 - Complete JWT authentication flow
 - API testing capabilities
 - Error handling
@@ -97,7 +111,7 @@ python3 jwt_auth_with_api_test.py \
 ```
 
 ### 2. JWT Authentication with Bruno Support
-The primary example (`jwt_api_with_bruno_support.py`) demonstrates:
+Script (`jwt_api_with_bruno_support.py`) for Bruno integration:
 - JWT authentication with Passbolt API
 - Bruno API client integration
 - Environment variable management
@@ -154,7 +168,7 @@ python3 jwt_api_with_bruno_support.py \
 ```
 
 ### 3. Automatic JWT Token Refresh
-A new script (`loop_refresh_jwt_token.py`) that automatically refreshes the JWT token:
+Script (`loop_refresh_jwt_token.py`) for automatic JWT token refresh:
 - Runs the JWT authentication script at regular intervals
 - Supports configuration via environment variables or YAML
 - Handles errors and provides status updates
@@ -189,8 +203,37 @@ BRUNO_ENV_PATH=.bruno_env/docker/environments
 BRUNO_ENV_NAME=local
 ```
 
-### 4. Legacy GPG Authentication
-A legacy example (`passbolt-gpgauth-example.sh`) demonstrating:
+### 4. Group Management
+Script (`group_update.py`) for creating groups and adding users. The script handles JWT authentication, group creation and management, user addition to existing groups, duplicate prevention, and supports both environment variables and command line arguments.
+
+```bash
+# Using environment variables
+export PASSBOLT_URL="https://passbolt.local"
+export USER_ID="your-user-id"
+export USER_EMAIL="user@example.com"
+export GROUP_NAME="My Group"
+python3 group_update.py
+
+# Using command line arguments
+python3 group_update.py --user-email "user@example.com" --group-name "My Group"
+
+# Using both (command line overrides environment)
+export USER_EMAIL="default@example.com"
+python3 group_update.py --user-email "override@example.com"
+
+# Full configuration via command line
+python3 group_update.py \
+    --passbolt-url "https://passbolt.local" \
+    --user-id "your-user-id" \
+    --user-email "user@example.com" \
+    --group-name "My Group" \
+    --private-key "path/to/private.key" \
+    --passphrase "your-passphrase" \
+    --fingerprint "your-fingerprint"
+```
+
+### 5. Legacy GPG Authentication
+Script (`passbolt-gpgauth-example.sh`) for legacy GPG authentication:
 - Traditional GPG authentication
 - Challenge/response flow
 - Session management
@@ -200,17 +243,9 @@ A legacy example (`passbolt-gpgauth-example.sh`) demonstrating:
 ./passbolt-gpgauth-example.sh
 ```
 
-### 5. Decrypt and Display All Resource Metadata (passbolt_api_metadata_client.py)
+### 6. Decrypt and Display All Resource Metadata (passbolt_api_metadata_client.py)
 
 This script fetches all resources Ada can access from a Passbolt v5 instance, decrypts their metadata and passwords, and displays the results in a table. It is intended for educational/demo use with test data.
-
-#### Requirements
-- Python 3.6+
-- [requests](https://pypi.org/project/requests/) (`pip install requests`)
-- [tabulate](https://pypi.org/project/tabulate/) (`pip install tabulate`)
-- GPG 2.1+
-- Ada's GPG private key (exported from Passbolt)
-- Ada's GPG key passphrase
 
 #### Setup
 1. Export Ada's private key from Passbolt (see GPG Key Setup above).
@@ -219,33 +254,8 @@ This script fetches all resources Ada can access from a Passbolt v5 instance, de
    - `PASSBOLT_URL` (default: `https://passbolt.local`)
    - `ADA_PRIVATE_KEY_PATH` (default: `ada_private.key`)
    - `ADA_PRIVATE_KEY_PASSPHRASE` (default: `ada@passbolt.com`)
-   - `PASSBOLT_USER_ID` and `PASSBOLT_USER_FPR` (see below)
-
-   **How to get your `PASSBOLT_USER_ID` and `PASSBOLT_USER_FPR`:**
-   
-   - **PASSBOLT_USER_ID**: This is your unique user ID in Passbolt. To find it:
-     1. Log in to your Passbolt web interface.
-     2. Go to **Users & Groups** (or your profile/settings).
-     3. Click on your user entry.
-     4. Look at the URL in your browser. It will look like:
-        `https://your-passbolt-instance/app/users/view/8599f576-9775-4ebc-a7cb-d102de1d46dd`
-        The long string at the end is your user ID.
-   
-   - **PASSBOLT_USER_FPR**: This is your GPG key fingerprint. To find it:
-     1. Run `gpg --list-secret-keys --keyid-format LONG` on your machine.
-     2. Find the entry for your Passbolt key. The fingerprint is the long hexadecimal string (e.g., `03F60E958F4CB29723ACDF761353B5B15D9B054F`).
-     3. If you have your private key as a file, you may need to import it first: `gpg --import /path/to/your_private.key`.
-
-   | Variable              | How to Obtain                                                      |
-   |----------------------|--------------------------------------------------------------------|
-   | `PASSBOLT_USER_ID`   | From Passbolt web UI user profile URL                              |
-   | `PASSBOLT_USER_FPR`  | From `gpg --list-secret-keys` output for your key                  |
-
-4. Install dependencies:
-   ```bash
-   pip install requests tabulate
-   ```
-5. Ensure GPG is installed and available in your PATH.
+   - `PASSBOLT_USER_ID` and `PASSBOLT_USER_FPR` (see Getting Your User ID and Fingerprint above)
+4. Ensure GPG is installed and available in your PATH.
 
 #### Usage
 Run the script:
@@ -437,6 +447,8 @@ Each script includes comprehensive help documentation that can be accessed using
 # View full script documentation
 python3 -c "import jwt_auth_with_api_test; help(jwt_auth_with_api_test)"
 python3 -c "import jwt_api_with_bruno_support; help(jwt_api_with_bruno_support)"
+python3 -c "import jwt_auth_minimum_example; help(jwt_auth_minimum_example)"
+python3 -c "import group_update; help(group_update)"
 python3 -c "import encrypt_secrets_for_bruno; help(encrypt_secrets_for_bruno)"
 python3 -c "import loop_refresh_jwt_token; help(loop_refresh_jwt_token)"
 python3 -c "import passbolt-gpgauth-example; help(passbolt-gpgauth-example)"
@@ -456,6 +468,8 @@ The help documentation includes:
 |--------|---------|--------------|
 | `jwt_auth_with_api_test.py` | Complete JWT auth | CLI args, error handling, API testing |
 | `jwt_api_with_bruno_support.py` | Bruno integration | Environment vars, token injection |
+| `jwt_auth_minimum_example.py` | Minimal JWT auth | Basic authentication flow |
+| `group_update.py` | Group management | User addition, duplicate prevention, CLI args |
 | `encrypt_secrets_for_bruno.py` | Secret encryption | GPG encryption, Bruno request handling |
 | `loop_refresh_jwt_token.py` | Automatic JWT token refresh | Environment vars, YAML configuration |
 | `passbolt-gpgauth-example.sh` | Legacy GPG auth | Traditional auth flow |

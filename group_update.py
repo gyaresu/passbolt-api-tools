@@ -19,14 +19,14 @@ Usage Examples:
     export USER_ID="your-user-id"
     export USER_EMAIL="user@example.com"
     export GROUP_NAME="My Group"
-    python3 group_user_test.py
+    python3 group_update.py
 
     # Using command line arguments
-    python3 group_user_test.py --user-email "user@example.com" --group-name "My Group"
+    python3 group_update.py --user-email "user@example.com" --group-name "My Group"
 
     # Using both (command line overrides environment)
     export USER_EMAIL="default@example.com"
-    python3 group_user_test.py --user-email "override@example.com"
+    python3 group_update.py --user-email "override@example.com"
 """
 
 import os

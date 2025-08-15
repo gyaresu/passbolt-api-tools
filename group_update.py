@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Script to create a group and add a user to it in Passbolt.
-Uses JWT authentication and handles existing groups.
+Script to create a group and manage user permissions in Passbolt.
+Uses JWT authentication and handles existing groups and admin status changes.
 
 Configuration:
 - Set environment variables or modify the constants below
@@ -27,6 +27,15 @@ Usage Examples:
     # Using both (command line overrides environment)
     export USER_EMAIL="default@example.com"
     python3 group_update.py --user-email "override@example.com"
+    
+    # Toggle admin status for existing user
+    python3 group_update.py --user-email "betty@passbolt.com" --group-name "Test Group" --toggle-admin
+    
+    # Set specific admin status
+    python3 group_update.py --user-email "betty@passbolt.com" --group-name "Test Group" --set-admin true
+    
+    # Remove user from group
+    python3 group_update.py --user-email "betty@passbolt.com" --group-name "Test Group" --remove-user
 """
 
 import os
@@ -44,7 +53,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def parse_arguments():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Create a Passbolt group and add a user to it")
+    parser = argparse.ArgumentParser(description="Create a Passbolt group and manage user permissions")
     parser.add_argument("--user-email", help="Email of the user to add to the group")
     parser.add_argument("--group-name", help="Name of the group to create/use")
     parser.add_argument("--passbolt-url", help="Passbolt instance URL")
@@ -52,6 +61,14 @@ def parse_arguments():
     parser.add_argument("--private-key", help="Path to your GPG private key file")
     parser.add_argument("--passphrase", help="Your GPG key passphrase")
     parser.add_argument("--fingerprint", help="Your GPG key fingerprint")
+    parser.add_argument("--toggle-admin", action="store_true", 
+                       help="Toggle admin status for the specified user (if already in group)")
+    parser.add_argument("--set-admin", choices=["true", "false"], 
+                       help="Set admin status to true or false for the specified user")
+    parser.add_argument("--delete-group", action="store_true",
+                       help="Delete the specified group")
+    parser.add_argument("--remove-user", action="store_true",
+                       help="Remove the specified user from the group")
     return parser.parse_args()
 
 # Configuration - Set these or use environment variables
@@ -202,6 +219,20 @@ def api_put(path, data, jwt_token):
         resp.raise_for_status()
     return resp.json()
 
+def api_delete(path, jwt_token):
+    """Helper function for DELETE requests."""
+    url = f"{PASSBOLT_URL}{path}"
+    headers = {
+        "Authorization": f"Bearer {jwt_token}",
+        "Accept": "application/json"
+    }
+    resp = requests.delete(url, headers=headers, verify=False)
+    if resp.status_code != 200:
+        print(f"[!] API Error: {resp.status_code}")
+        print(f"[!] Response: {resp.text}")
+        resp.raise_for_status()
+    return resp.json()
+
 def main():
     # Parse command line arguments
     args = parse_arguments()
@@ -244,7 +275,7 @@ def main():
     print("[*] Getting JWT token...")
     try:
         jwt_token = get_jwt_token()
-        print("[+] JWT token obtained successfully")
+        print("[+] JWT token obtained")
     except Exception as e:
         print(f"[!] Failed to get JWT token: {e}")
         return
@@ -287,32 +318,54 @@ def main():
         print(f"[+] Found existing group: {existing_group['id']}")
         group_id = existing_group["id"]
 
+        # Handle group deletion if requested
+        if args.delete_group:
+            print(f"[*] Deleting group: {GROUP_NAME}")
+            try:
+                api_delete(f"/groups/{group_id}.json", jwt_token)
+                print(f"[+] Group '{GROUP_NAME}' deleted")
+                print(f"\n=== Operation Complete ===")
+                print(f"Group '{GROUP_NAME}' was deleted")
+                return
+            except Exception as e:
+                print(f"[!] Failed to delete group: {e}")
+                return
+
         # Check if the target user is already in the group
         users_in_group = existing_group.get("users", [])
         user_already_in_group = any(user.get("username") == USER_EMAIL for user in users_in_group)
 
         if user_already_in_group:
             print(f"[+] User {USER_EMAIL} is already in the group")
+            
+            # Check if admin management is requested
+            if args.toggle_admin or args.set_admin is not None:
+                print(f"[*] Admin management requested for existing user")
+                # We'll handle this in the admin management section
         else:
             print(f"[*] User {USER_EMAIL} is not in the group, will add them")
     else:
         print(f"[*] Group '{GROUP_NAME}' does not exist, creating new group...")
 
-        # Create group with only the current user initially
+        # Create group with both current user and target user
         group_data = {
             "name": GROUP_NAME,
             "groups_users": [
                 {
                     "user_id": USER_ID,  # Current user as group manager
                     "is_admin": True
+                },
+                {
+                    "user_id": target_user_id,  # Target user
+                    "is_admin": False
                 }
             ]
         }
 
         group_response = api_post("/groups.json", group_data, jwt_token)
         group_id = group_response["body"]["id"]
-        print(f"[+] Group created successfully: {group_id}")
-        user_already_in_group = False
+        print(f"[+] Group created: {group_id}")
+        user_already_in_group = True  # User is now in the group
 
     # ============================================================================
     # Step 3: Add User to Group (if not already in group)
@@ -336,22 +389,144 @@ def main():
 
         try:
             api_put(f"/groups/{group_id}.json", update_group_data, jwt_token)
-            print(f"[+] User {USER_EMAIL} successfully added to group {GROUP_NAME}")
+            print(f"[+] User {USER_EMAIL} added to group {GROUP_NAME}")
         except Exception as e:
             print(f"[!] Failed to add user to existing group: {e}")
             return
     else:
-        print(f"[+] User {USER_EMAIL} is already in the group, no action needed")
+        print(f"[+] User {USER_EMAIL} is already in the group")
+
+    # ============================================================================
+    # Step 3.5: Admin Management (if requested)
+    # ============================================================================
+    if user_already_in_group and (args.toggle_admin or args.set_admin is not None):
+        print(f"[*] Managing admin status for user {USER_EMAIL}...")
+        
+        # Get detailed group information to find the user's group relationship ID
+        group_details = api_get(f"/groups/{group_id}.json?contain[users]=1", jwt_token=jwt_token)
+        
+        if "body" not in group_details or "users" not in group_details["body"]:
+            print("[!] Could not retrieve group details for admin management")
+            return
+            
+        # Find the target user in the group and get their current admin status
+        target_user_in_group = None
+        for user in group_details["body"]["users"]:
+            if user.get("username") == USER_EMAIL:
+                target_user_in_group = user
+                break
+                
+        if not target_user_in_group:
+            print(f"[!] User {USER_EMAIL} not found in group details")
+            return
+            
+        current_admin_status = target_user_in_group["_joinData"]["is_admin"]
+        group_user_id = target_user_in_group["_joinData"]["id"]
+        
+        print(f"[*] Current admin status: {current_admin_status}")
+        
+        # Determine new admin status
+        new_admin_status = current_admin_status
+        if args.toggle_admin:
+            new_admin_status = not current_admin_status
+            print(f"[*] Toggling admin status from {current_admin_status} to {new_admin_status}")
+        elif args.set_admin is not None:
+            new_admin_status = args.set_admin.lower() == "true"
+            print(f"[*] Setting admin status to {new_admin_status}")
+            
+        if new_admin_status == current_admin_status:
+            print(f"[+] Admin status is already {new_admin_status}, no change needed")
+        else:
+            # Build the complete groups_users array with all existing users
+            groups_users_update = []
+            for user in group_details["body"]["users"]:
+                user_group_data = {
+                    "id": user["_joinData"]["id"],  # Use the group relationship ID
+                    "is_admin": user["_joinData"]["is_admin"]
+                }
+                
+                # Update the target user's admin status
+                if user.get("username") == USER_EMAIL:
+                    user_group_data["is_admin"] = new_admin_status
+                    
+                groups_users_update.append(user_group_data)
+            
+            update_group_data = {
+                "groups_users": groups_users_update,
+                "secrets": []
+            }
+            
+            print(f"[*] Sending admin update payload: {json.dumps(update_group_data, indent=2)}")
+            
+            try:
+                api_put(f"/groups/{group_id}.json", update_group_data, jwt_token)
+                print(f"[+] Admin status updated for {USER_EMAIL} to {new_admin_status}")
+            except Exception as e:
+                print(f"[!] Failed to update admin status: {e}")
+                return
+
+    # ============================================================================
+    # Step 3.6: Remove User from Group (if requested)
+    # ============================================================================
+    if args.remove_user and user_already_in_group:
+        print(f"[*] Removing user {USER_EMAIL} from group...")
+        
+        # Get detailed group information
+        group_details = api_get(f"/groups/{group_id}.json?contain[users]=1", jwt_token=jwt_token)
+        
+        if "body" not in group_details or "users" not in group_details["body"]:
+            print("[!] Could not retrieve group details for user removal")
+            return
+            
+        # Build the groups_users array - only include the user to be deleted
+        groups_users_update = []
+        for user in group_details["body"]["users"]:
+            if user.get("username") == USER_EMAIL:
+                user_group_data = {
+                    "id": user["_joinData"]["id"],  # Use the group relationship ID
+                    "delete": True
+                }
+                print(f"[*] Marking user {USER_EMAIL} for deletion")
+                groups_users_update.append(user_group_data)
+                break  # Only include the user to be deleted
+        
+        update_group_data = {
+            "groups_users": groups_users_update,
+            "secrets": []
+        }
+        
+        print(f"[*] Sending user removal payload: {json.dumps(update_group_data, indent=2)}")
+        
+        try:
+            api_put(f"/groups/{group_id}.json", update_group_data, jwt_token)
+            print(f"[+] Removed {USER_EMAIL} from group {GROUP_NAME}")
+            
+            # Refresh the group check after removal
+            print(f"[*] Refreshing group membership check...")
+            refresh_group_response = api_get(f"/groups/{group_id}.json?contain[users]=1", jwt_token=jwt_token)
+            if "body" in refresh_group_response and "users" in refresh_group_response["body"]:
+                refresh_users_in_group = refresh_group_response["body"]["users"]
+                user_still_in_group = any(user.get("username") == USER_EMAIL for user in refresh_users_in_group)
+                if not user_still_in_group:
+                    print(f"[+] Confirmed: {USER_EMAIL} has been removed from the group")
+                else:
+                    print(f"[!] Warning: {USER_EMAIL} is still showing in the group after removal")
+        except Exception as e:
+            print(f"[!] Failed to remove user from group: {e}")
+            return
+    elif args.remove_user and not user_already_in_group:
+        print(f"[!] User {USER_EMAIL} is not in the group, cannot remove")
 
     # ============================================================================
     # Step 4: Verify Group Membership
     # ============================================================================
     print("[*] Verifying group membership...")
 
-    group_details = api_get(f"/groups/{group_id}.json?contain[users]=1", jwt_token=jwt_token)
+    # Always fetch fresh group details for verification
+    verification_group_details = api_get(f"/groups/{group_id}.json?contain[users]=1", jwt_token=jwt_token)
 
-    if "body" in group_details and "users" in group_details["body"]:
-        users_in_group = group_details["body"]["users"]
+    if "body" in verification_group_details and "users" in verification_group_details["body"]:
+        users_in_group = verification_group_details["body"]["users"]
         print(f"[+] Group {GROUP_NAME} now contains {len(users_in_group)} users:")
         for user in users_in_group:
             username = user["username"]
@@ -359,11 +534,20 @@ def main():
             print(f"    - {username} ({'Admin' if is_admin else 'Member'})")
     else:
         print("[!] Could not verify group membership - unexpected response structure")
-        print(f"Response: {json.dumps(group_details, indent=2)}")
+        print(f"Response: {json.dumps(verification_group_details, indent=2)}")
 
-    print("\n=== Operation Completed Successfully ===")
+    print(f"\n=== Operation Complete ===")
     print(f"Group '{GROUP_NAME}' created with ID: {group_id}")
-    print(f"User '{USER_EMAIL}' added to the group")
+    
+    # Determine what operation was performed based on arguments
+    if args.remove_user:
+        print(f"User '{USER_EMAIL}' was removed from the group")
+    elif args.toggle_admin or args.set_admin is not None:
+        print(f"Admin status for '{USER_EMAIL}' was managed")
+    elif args.delete_group:
+        print(f"Group '{GROUP_NAME}' was deleted")
+    else:
+        print(f"User '{USER_EMAIL}' added to the group")
 
 if __name__ == "__main__":
     main()

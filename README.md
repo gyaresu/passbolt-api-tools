@@ -10,12 +10,14 @@
   `python3 jwt_auth_minimum_example.py`
 - **Automatic JWT token refresh:**
   `python3 loop_refresh_jwt_token.py`
-- **Group management (create groups and add users):**
+- **Group management (create groups, manage users, admin permissions):**
   `python3 group_update.py`
 - **Legacy GPG authentication (shell):**
   `./passbolt-gpgauth-example.sh`
 - **Decrypt and display all resource metadata/passwords (table):**
   `python3 passbolt_api_metadata_client.py`
+- **Encrypt secrets for Bruno API client:**
+  `python3 encrypt_secrets_for_bruno.py`
 
 ## Prerequisites
 
@@ -204,7 +206,15 @@ BRUNO_ENV_NAME=local
 ```
 
 ### 4. Group Management
-Script (`group_update.py`) for creating groups and adding users. The script handles JWT authentication, group creation and management, user addition to existing groups, duplicate prevention, and supports both environment variables and command line arguments.
+Script (`group_update.py`) for creating groups and managing user permissions. The script handles JWT authentication, group creation and management, user addition to existing groups, admin status management, and demonstrates the correct Passbolt API usage patterns.
+
+**Key Features:**
+- Create new groups and add users
+- Toggle or set admin status for existing users
+- Remove users from groups
+- Delete groups
+- Demonstrates correct API usage: `user_id` for new users, `id` for existing users
+- Demonstrates the need to GET groups first for relationship IDs
 
 ```bash
 # Using environment variables
@@ -221,6 +231,18 @@ python3 group_update.py --user-email "user@example.com" --group-name "My Group"
 export USER_EMAIL="default@example.com"
 python3 group_update.py --user-email "override@example.com"
 
+# Toggle admin status for existing user
+python3 group_update.py --user-email "betty@passbolt.com" --group-name "Test Group" --toggle-admin
+
+# Set specific admin status
+python3 group_update.py --user-email "betty@passbolt.com" --group-name "Test Group" --set-admin true
+
+# Delete a group
+python3 group_update.py --group-name "Test Group" --delete-group
+
+# Remove user from group
+python3 group_update.py --user-email "betty@passbolt.com" --group-name "Test Group" --remove-user
+
 # Full configuration via command line
 python3 group_update.py \
     --passbolt-url "https://passbolt.local" \
@@ -231,6 +253,67 @@ python3 group_update.py \
     --passphrase "your-passphrase" \
     --fingerprint "your-fingerprint"
 ```
+
+### 4.1 Passbolt Group API Insights
+
+This script demonstrates important Passbolt API behavior discovered through testing:
+
+**API Field Usage:**
+- **`user_id`**: Used for adding NEW users to groups
+- **`id`**: Used for modifying EXISTING users in groups (requires GET group first)
+
+**Required Workflow for Existing Users:**
+1. GET the group to obtain relationship IDs: `GET /groups/{id}.json?contain[users]=1`
+2. Extract the `id` field from the user's `_joinData` object
+3. Use that `id` in your update payload
+
+**API Validation:**
+- Cannot mix `user_id` and `id` for the same user in one payload
+- API rejects attempts to add existing users with `user_id`
+- API enforces consistency between new vs existing user operations
+- Removing users requires including the user with `"delete": true` field in the payload
+
+**Example Payloads:**
+
+Adding new user:
+```json
+{
+  "groups_users": [
+    {
+      "user_id": "76ddd3fd-9eec-41c6-83e2-50b1ecb730b8",
+      "is_admin": false
+    }
+  ]
+}
+```
+
+Modifying existing user:
+```json
+{
+  "groups_users": [
+    {
+      "id": "17cfbd1d-d624-4cd5-b62c-e05b87322517",
+      "is_admin": true
+    }
+  ]
+}
+```
+
+Removing existing user:
+```json
+{
+  "groups_users": [
+    {
+      "id": "17cfbd1d-d624-4cd5-b62c-e05b87322517",
+      "delete": true
+    }
+  ]
+}
+```
+
+**Note:** Only include the user to be deleted in the payload, not all users.
+
+This behavior demonstrates the distinction between `user_id` and `id` fields for group operations.
 
 ### 5. Legacy GPG Authentication
 Script (`passbolt-gpgauth-example.sh`) for legacy GPG authentication:
@@ -441,7 +524,7 @@ Note: The `--secret` parameter is the actual secret value (password, API key, et
 ## Documentation
 
 ### Script Documentation
-Each script includes comprehensive help documentation that can be accessed using Python's built-in help system:
+Each script includes help documentation that can be accessed using Python's built-in help system:
 
 ```bash
 # View full script documentation
@@ -469,7 +552,7 @@ The help documentation includes:
 | `jwt_auth_with_api_test.py` | Complete JWT auth | CLI args, error handling, API testing |
 | `jwt_api_with_bruno_support.py` | Bruno integration | Environment vars, token injection |
 | `jwt_auth_minimum_example.py` | Minimal JWT auth | Basic authentication flow |
-| `group_update.py` | Group management | User addition, duplicate prevention, CLI args |
+| `group_update.py` | Group management | User addition/removal, admin management, group deletion, API validation |
 | `encrypt_secrets_for_bruno.py` | Secret encryption | GPG encryption, Bruno request handling |
 | `loop_refresh_jwt_token.py` | Automatic JWT token refresh | Environment vars, YAML configuration |
 | `passbolt-gpgauth-example.sh` | Legacy GPG auth | Traditional auth flow |

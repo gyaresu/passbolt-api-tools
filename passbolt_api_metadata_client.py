@@ -46,7 +46,7 @@ from tabulate import tabulate
 PASSBOLT_URL = "https://passbolt.local"
 ADA_PRIVATE_KEY_PATH = "ada_private.key"
 ADA_PRIVATE_KEY_PASSPHRASE = "ada@passbolt.com"
-PASSBOLT_USER_ID = "0460d687-f393-490a-b710-79f333aae3b1"
+PASSBOLT_USER_ID = "d2385e03-490c-4318-9bc0-d7c309657b30"
 PASSBOLT_USER_FPR = "03F60E958F4CB29723ACDF761353B5B15D9B054F"
 
 # Ignore SSL warnings for self-signed certs
@@ -335,4 +335,4 @@ def main():
     print(tabulate(table, headers=headers, tablefmt='grid'))
 
 if __name__ == "__main__":
-    main() 
+    main()

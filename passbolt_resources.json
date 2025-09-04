@@ -1,0 +1,20 @@
+{
+  "metadata": {
+    "processed_at": "2025-09-05T09:55:07.727872",
+    "total_resources": 1,
+    "authenticated_user": "Ada Lovelace",
+    "filter": {
+      "expired_resources": true,
+      "near_expiry_days": 7
+    }
+  },
+  "resources": [
+    {
+      "name": "shared test",
+      "owner": "Ada Lovelace",
+      "owner_email": "ada@passbolt.com",
+      "expiration": "2025-09-04T23:49:33+00:00",
+      "status": "expired"
+    }
+  ]
+}

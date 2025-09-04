@@ -4,12 +4,14 @@ Passbolt Resource Metadata Demo
 
 Demonstrates Passbolt API integration including JWT authentication, resource decryption,
 and metadata parsing. Shows how to handle both user_key and shared_key encryption scenarios.
+Supports JSON output for monitoring expired and near-expiry resources.
 
 Key technical concepts:
 - JWT authentication with GPG challenge/response
 - Metadata encryption types: user_key vs shared_key
 - GPG decryption of both metadata and secrets
 - Resource data parsing and expiry date extraction
+- Expiry filtering for monitoring expired and near-expiry resources
 
 Authentication flow:
 1. Create isolated GPG keyring
@@ -42,6 +44,8 @@ Optional Arguments:
     --passphrase PASSPHRASE   User's GPG key passphrase (default: ada@passbolt.com)
     -v, --verbose             Show detailed educational explanations
     --debug                   Show API requests/responses and debug info
+    --json                    Output results as JSON file (expired and near-expiry resources only)
+    --expiry-days DAYS        Days before expiry to include in JSON output (default: 30)
 
 Examples:
     # Using command line arguments
@@ -66,6 +70,12 @@ Examples:
     
     # Debug mode with API request/response details
     python3 metadata_demo.py --debug
+    
+    # JSON output mode - saves to passbolt_resources.json
+    python3 metadata_demo.py --json
+    
+    # JSON output with custom expiry threshold (7 days)
+    python3 metadata_demo.py --json --expiry-days 7
 
 Notes:
 - Requires Python 3.6+, requests, tabulate, and GPG 2.1+
@@ -74,6 +84,8 @@ Notes:
 - Output is a table with key resource fields including expiry dates
 - User ID and GPG fingerprint are retrieved dynamically from the API
 - Expiry dates are displayed in ISO 8601 format when available
+- JSON output filters for expired and near-expiry resources only
+- JSON output includes resource name, owner, owner email, expiration date, and status
 """
 
 import requests
@@ -125,7 +137,8 @@ def get_user_info(jwt_token, passbolt_url, debug=False):
         "user_id": user_info["id"],
         "gpg_fingerprint": user_info["gpgkey"]["fingerprint"],
         "username": user_info["username"],
-        "full_name": f"{user_info['profile']['first_name']} {user_info['profile']['last_name']}"
+        "full_name": f"{user_info['profile']['first_name']} {user_info['profile']['last_name']}",
+        "email": user_info["username"]  # Username is typically the email in Passbolt
     }
 
 def get_jwt_token_with_config(user_id, passbolt_url, key_file, passphrase, gpg_home):
@@ -344,9 +357,22 @@ def api_get(path, jwt_token=None, passbolt_url=None, debug=False):
 # MAIN LOGIC
 # =============================================================================
 def main():
-    """Main execution: authenticate, fetch, decrypt, and display resources with expiry information."""
+    """
+    Main execution: authenticate, fetch, decrypt, and display resources with expiry information.
+    
+    Supports two output modes:
+    - Table format: Shows all resources in a formatted table
+    - JSON format: Filters and outputs only expired and near-expiry resources
+    
+    JSON output includes:
+    - Resource name
+    - Owner (authenticated user)
+    - Owner email
+    - Expiration date
+    - Status (expired or expires_in_X_days)
+    """
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description='Passbolt Resource Metadata Demo - includes expiry date information')
+    parser = argparse.ArgumentParser(description='Passbolt Resource Metadata Demo - includes expiry date information and JSON output for monitoring')
     
     # Config file support
     parser.add_argument('--env-file', help="Optional .env file with key=value pairs")
@@ -358,6 +384,8 @@ def main():
     parser.add_argument('--passphrase', help='Private key passphrase')
     parser.add_argument('-v', '--verbose', action='store_true', help='Show detailed educational explanations')
     parser.add_argument('--debug', action='store_true', help='Show API requests/responses and debug info')
+    parser.add_argument('--json', action='store_true', help='Output results as JSON (expired and near-expiry resources only)')
+    parser.add_argument('--expiry-days', type=int, default=30, help='Days before expiry to include in JSON output (default: 30)')
     
     args = parser.parse_args()
     
@@ -386,6 +414,8 @@ def main():
     user_id = config["user_id"]
     verbose = args.verbose
     debug = args.debug
+    json_output = args.json
+    expiry_days = args.expiry_days
     
     # Create temporary GPG home directory for the entire session
     import tempfile, shutil
@@ -439,6 +469,7 @@ def main():
             print()
         
         table = []
+        json_data = []
         headers = [
             "Name", "ID", "Password", "TOTP", "Custom Fields", "Username", "URL", "Description", "Icon", "Expiry"
         ]
@@ -641,13 +672,63 @@ def main():
                 icon,
                 expiry
             ])
+            
+            # Collect JSON data for --json output (expired and near-expiry only)
+            if json_output and expiry:
+                from datetime import datetime, timezone
+                try:
+                    # Parse expiry date from ISO 8601 format
+                    expiry_dt = datetime.fromisoformat(expiry.replace('Z', '+00:00'))
+                    now = datetime.now(timezone.utc)
+                    
+                    # Calculate days until expiry and determine status
+                    days_until_expiry = (expiry_dt - now).days
+                    is_expired = days_until_expiry < 0
+                    is_near_expiry = 0 <= days_until_expiry <= expiry_days
+                    
+                    # Include resource if expired or within configured days of expiry
+                    if is_expired or is_near_expiry:
+                        json_data.append({
+                            "name": meta_name,
+                            "owner": user_info['full_name'],  # Current user owns accessible resources
+                            "owner_email": user_info['email'],
+                            "expiration": expiry,
+                            "status": "expired" if is_expired else f"expires_in_{days_until_expiry}_days"
+                        })
+                except (ValueError, TypeError):
+                    # Skip resources with invalid or unparseable expiry dates
+                    pass
 
-        # Print the results as a table with better formatting
-        print("\n📋 Resource Summary:")
-        print(tabulate(table, headers=headers, tablefmt='grid', maxcolwidths=[20, 10, 20, 30, 20, 15, 30, 20, 15, 25]))
-        
-        # Always show basic summary
-        print(f"\n✅ Processed {len(table)} resources successfully")
+        # Output results based on format
+        if json_output:
+            # Create JSON output with metadata and filtered resources
+            output_data = {
+                "metadata": {
+                    "processed_at": __import__('datetime').datetime.now().isoformat(),
+                    "total_resources": len(json_data),
+                    "authenticated_user": user_info['full_name'],
+                    "filter": {
+                        "expired_resources": True,
+                        "near_expiry_days": expiry_days
+                    }
+                },
+                "resources": json_data
+            }
+            
+            # Write JSON output to file
+            output_file = "passbolt_resources.json"
+            with open(output_file, 'w') as f:
+                json.dump(output_data, f, indent=2)
+            
+            print(f"JSON output written to: {output_file}")
+            print(f"Processed {len(json_data)} resources successfully")
+        else:
+            # Print the results as a table with better formatting
+            print("\n📋 Resource Summary:")
+            print(tabulate(table, headers=headers, tablefmt='grid', maxcolwidths=[20, 10, 20, 30, 20, 15, 30, 20, 15, 25]))
+            
+            # Always show basic summary
+            print(f"\n✅ Processed {len(table)} resources successfully")
         
         if verbose:
             print()

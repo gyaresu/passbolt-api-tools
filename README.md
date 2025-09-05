@@ -14,8 +14,8 @@
   `python3 group_update.py`
 - **Legacy GPG authentication (shell):**
   `./passbolt-gpgauth-example.sh`
-- **Decrypt and display all resource metadata/passwords (table):**
-  `python3 passbolt_api_metadata_client.py`
+- **Decrypt and display all resource metadata/passwords (table/JSON):**
+  `python3 metadata_demo.py`
 - **Encrypt secrets for Bruno API client:**
   `python3 encrypt_secrets_for_bruno.py`
 
@@ -326,45 +326,102 @@ Script (`passbolt-gpgauth-example.sh`) for legacy GPG authentication:
 ./passbolt-gpgauth-example.sh
 ```
 
-### 6. Decrypt and Display All Resource Metadata (passbolt_api_metadata_client.py)
+### 6. Resource Metadata Demo (metadata_demo.py)
 
-This script fetches all resources Ada can access from a Passbolt v5 instance, decrypts their metadata and passwords, and displays the results in a table. It is intended for educational/demo use with test data.
+This script demonstrates Passbolt API integration including JWT authentication, resource decryption, and metadata parsing. It supports both table and JSON output formats, with JSON output specifically designed for monitoring expired and near-expiry resources.
+
+#### Key Features
+- **JWT Authentication**: Complete GPG challenge/response authentication flow
+- **Resource Decryption**: Handles both user_key and shared_key encryption scenarios
+- **Table Output**: Displays all resources in a formatted table with expiry dates
+- **JSON Output**: Filters and outputs only expired and near-expiry resources for monitoring
+- **Educational**: Includes verbose mode with detailed explanations of the authentication and decryption process
 
 #### Setup
-1. Export Ada's private key from Passbolt (see GPG Key Setup above).
+1. Export your private key from Passbolt (see GPG Key Setup above).
 2. Place the key file (e.g., `ada_private.key`) in the project directory.
-3. Edit the script to set:
-   - `PASSBOLT_URL` (default: `https://passbolt.local`)
-   - `ADA_PRIVATE_KEY_PATH` (default: `ada_private.key`)
-   - `ADA_PRIVATE_KEY_PASSPHRASE` (default: `ada@passbolt.com`)
-   - `PASSBOLT_USER_ID` and `PASSBOLT_USER_FPR` (see Getting Your User ID and Fingerprint above)
-4. Ensure GPG is installed and available in your PATH.
+3. Create a `.env` file with your configuration:
+```env
+USER_ID=33c6ef32-c367-4287-9721-be6845231688
+URL=https://passbolt.local
+KEY_FILE=ada_private.key
+PASSPHRASE=ada@passbolt.com
+```
 
 #### Usage
-Run the script:
+
+**Table Output (Default):**
 ```bash
-python3 passbolt_api_metadata_client.py
+# Using .env file
+python3 metadata_demo.py
+
+# Using command line arguments
+python3 metadata_demo.py --user-id 33c6ef32-c367-4287-9721-be6845231688
+
+# With verbose explanations
+python3 metadata_demo.py -v
 ```
 
-The script will:
-- Authenticate to Passbolt using JWT and Ada's private key
-- Fetch all resources Ada can access
-- Decrypt each resource's metadata and password
-- Display a table with columns:
-  - Name, ID, Password, TOTP, Custom Fields, Username, URL, Description, Icon
+**JSON Output for Monitoring:**
+```bash
+# Default 30-day expiry threshold
+python3 metadata_demo.py --json
 
-**Sample Output (truncated for readability):**
-```
-+-----------------------+----------+--------------------+----------------+-------------------------------+
-| Name                  | ID       | Password           | Username       | URL                           |
-+=======================+==========+====================+================+===============================+
-| e2ee test             | 5c90c883 | N$=hY=K6v@h,&f)iT9 | edith          | https://example.com, ...      |
-+-----------------------+----------+--------------------+----------------+-------------------------------+
-```
-*Table truncated for readability. Actual output includes TOTP, Custom Fields, Description, Icon, etc.*
+# Custom 7-day threshold
+python3 metadata_demo.py --json --expiry-days 7
 
-- If a resource cannot be decrypted, it will be skipped.
-- The script is intended for local/test Passbolt instances and should not be used with real data.
+# Very strict 1-day threshold
+python3 metadata_demo.py --json --expiry-days 1
+```
+
+#### Output Formats
+
+**Table Output:**
+- Shows all accessible resources in a formatted table
+- Columns: Name, ID, Password, TOTP, Custom Fields, Username, URL, Description, Icon, Expiry
+- Includes expiry dates in ISO 8601 format
+
+**JSON Output:**
+- Filters for expired and near-expiry resources only
+- Saves to `passbolt_resources.json`
+- Includes: resource ID, name, owner, owner email, expiration date, status
+- Data sources: resources table (ID, expiration), users table (owner info), decrypted metadata (name)
+
+**Sample JSON Output:**
+```json
+{
+  "metadata": {
+    "processed_at": "2025-09-05T10:07:00.193061",
+    "total_resources": 1,
+    "authenticated_user": "Ada Lovelace",
+    "filter": {
+      "expired_resources": true,
+      "near_expiry_days": 7
+    }
+  },
+  "resources": [
+    {
+      "resource_id": "26b62344-572d-4a44-a72c-9d7b6e5788c1",
+      "name": "shared test",
+      "owner": "Ada Lovelace",
+      "owner_email": "ada@passbolt.com",
+      "expiration": "2025-09-04T23:49:33+00:00",
+      "status": "expired"
+    }
+  ]
+}
+```
+
+#### Educational Features
+- **Verbose Mode (`-v`)**: Shows detailed step-by-step explanations of the authentication and decryption process
+- **Debug Mode (`--debug`)**: Displays API request/response details for learning
+- **Technical Comments**: Inline documentation explaining GPG operations, encryption types, and data flow
+
+#### Security Notes
+- Uses isolated GPG keyrings for security
+- Skips resources that cannot be decrypted
+- Intended for educational/demo use with test data
+- Should not be used with production data
 
 ## Supporting Tools
 
@@ -531,6 +588,7 @@ Each script includes help documentation that can be accessed using Python's buil
 python3 -c "import jwt_auth_with_api_test; help(jwt_auth_with_api_test)"
 python3 -c "import jwt_api_with_bruno_support; help(jwt_api_with_bruno_support)"
 python3 -c "import jwt_auth_minimum_example; help(jwt_auth_minimum_example)"
+python3 -c "import metadata_demo; help(metadata_demo)"
 python3 -c "import group_update; help(group_update)"
 python3 -c "import encrypt_secrets_for_bruno; help(encrypt_secrets_for_bruno)"
 python3 -c "import loop_refresh_jwt_token; help(loop_refresh_jwt_token)"
@@ -552,6 +610,7 @@ The help documentation includes:
 | `jwt_auth_with_api_test.py` | Complete JWT auth | CLI args, error handling, API testing |
 | `jwt_api_with_bruno_support.py` | Bruno integration | Environment vars, token injection |
 | `jwt_auth_minimum_example.py` | Minimal JWT auth | Basic authentication flow |
+| `metadata_demo.py` | Resource metadata demo | Table/JSON output, expiry monitoring, educational mode |
 | `group_update.py` | Group management | User addition/removal, admin management, group deletion, API validation |
 | `encrypt_secrets_for_bruno.py` | Secret encryption | GPG encryption, Bruno request handling |
 | `loop_refresh_jwt_token.py` | Automatic JWT token refresh | Environment vars, YAML configuration |

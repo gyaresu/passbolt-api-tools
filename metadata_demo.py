@@ -85,7 +85,8 @@ Notes:
 - User ID and GPG fingerprint are retrieved dynamically from the API
 - Expiry dates are displayed in ISO 8601 format when available
 - JSON output filters for expired and near-expiry resources only
-- JSON output includes resource name, owner, owner email, expiration date, and status
+- JSON output includes resource ID, name, owner, owner email, expiration date, and status
+- JSON data sources: resources table (ID, expiration), users table (owner info), decrypted metadata (name)
 """
 
 import requests
@@ -365,10 +366,11 @@ def main():
     - JSON format: Filters and outputs only expired and near-expiry resources
     
     JSON output includes:
-    - Resource name
-    - Owner (authenticated user)
-    - Owner email
-    - Expiration date
+    - Resource ID (from resources table)
+    - Resource name (from decrypted metadata)
+    - Owner (authenticated user from users table)
+    - Owner email (from users.username field)
+    - Expiration date (from resources.expired field)
     - Status (expired or expires_in_X_days)
     """
     # Parse command line arguments
@@ -689,10 +691,11 @@ def main():
                     # Include resource if expired or within configured days of expiry
                     if is_expired or is_near_expiry:
                         json_data.append({
+                            "resource_id": resource_id,  # From resources table
                             "name": meta_name,
                             "owner": user_info['full_name'],  # Current user owns accessible resources
                             "owner_email": user_info['email'],
-                            "expiration": expiry,
+                            "expiration": expiry,  # From resources.expired field
                             "status": "expired" if is_expired else f"expires_in_{days_until_expiry}_days"
                         })
                 except (ValueError, TypeError):
@@ -702,6 +705,7 @@ def main():
         # Output results based on format
         if json_output:
             # Create JSON output with metadata and filtered resources
+            # Data sources: resources table (ID, expiration), users table (owner info), decrypted metadata (name)
             output_data = {
                 "metadata": {
                     "processed_at": __import__('datetime').datetime.now().isoformat(),

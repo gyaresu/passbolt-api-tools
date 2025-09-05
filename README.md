@@ -61,7 +61,7 @@ source venv/bin/activate
 .\venv\Scripts\activate
 
 # Install required packages
-pip3 install requests python-dotenv pyyaml
+pip3 install requests python-dotenv pyyaml tabulate
 ```
 
 ### Required Packages
@@ -340,11 +340,25 @@ This script demonstrates Passbolt API integration including JWT authentication, 
 #### Setup
 1. Export your private key from Passbolt (see GPG Key Setup above).
 2. Place the key file (e.g., `ada_private.key`) in the project directory.
-3. Create a `.env` file with your configuration:
+3. Copy the example environment file and configure it:
+```bash
+cp env.example .env
+```
+4. Edit the `.env` file with your configuration:
 ```env
+# Passbolt Configuration
+# Copy this file to .env and update with your values
+
+# Required: Passbolt user ID
 USER_ID=33c6ef32-c367-4287-9721-be6845231688
+
+# Optional: Passbolt server URL (default: https://passbolt.local)
 URL=https://passbolt.local
+
+# Optional: Path to GPG private key file (default: ada_private.key)
 KEY_FILE=ada_private.key
+
+# Optional: GPG key passphrase (default: ada@passbolt.com)
 PASSPHRASE=ada@passbolt.com
 ```
 

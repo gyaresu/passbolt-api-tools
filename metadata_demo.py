@@ -79,6 +79,7 @@ Examples:
 
 Notes:
 - Requires Python 3.6+, requests, tabulate, and GPG 2.1+
+- Requires Passbolt Pro Edition with password expiry feature enabled in administration settings (/app/administration/password-expiry)
 - Intended for educational/demo use with test data
 - Skips resources that cannot be decrypted
 - Output is a table with key resource fields including expiry dates
@@ -510,6 +511,7 @@ def main():
                 
                 # Extract expiry date directly from resource (not encrypted)
                 # Note: 'expired' field contains the actual expiry date, not a boolean
+                # Note: Password expiry feature must be enabled in Passbolt Pro Edition administration (/app/administration/password-expiry)
                 expiry = resource.get('expired', '')
 
                 # Import user's private key to the temporary keyring
@@ -741,6 +743,9 @@ def main():
             print(f"  • Resources with custom fields: {sum(1 for row in table if row[4])}")
             print(f"  • Resources with TOTP: {sum(1 for row in table if row[3])}")
             print(f"  • Resources with expiry dates: {sum(1 for row in table if row[9])}")
+            print()
+            print("ℹ️  Note: Password expiry feature must be enabled in Passbolt Pro Edition")
+            print("   administration (/app/administration/password-expiry) for expiry dates to be displayed.")
             print()
             print("🔐 Security Notes:")
             print("  • All data encrypted with GPG")

@@ -340,11 +340,12 @@ This script demonstrates Passbolt API integration including JWT authentication, 
 #### Setup
 1. Export your private key from Passbolt (see GPG Key Setup above).
 2. Place the key file (e.g., `ada_private.key`) in the project directory.
-3. Copy the example environment file and configure it:
+3. **Enable password expiry in Passbolt**: Go to `/app/administration/password-expiry` in your Passbolt instance and enable the password expiry feature. This is a Pro Edition feature required for expiry dates to be displayed. See the [Passbolt Password Expiry documentation](https://www.passbolt.com/docs/admin/password-configuration/password-expiry/#expiry-policies) for details.
+4. Copy the example environment file and configure it:
 ```bash
 cp env.example .env
 ```
-4. Edit the `.env` file with your configuration:
+5. Edit the `.env` file with your configuration:
 ```env
 # Passbolt Configuration
 # Copy this file to .env and update with your values
@@ -400,6 +401,7 @@ python3 metadata_demo.py --json --expiry-days 1
 - Saves to `passbolt_resources.json`
 - Includes: resource ID, name, owner, owner email, expiration date, status
 - Data sources: resources table (ID, expiration), users table (owner info), decrypted metadata (name)
+- Default expiry period: 90 days (configurable in Passbolt Pro administration)
 
 **Sample JSON Output:**
 ```json
@@ -436,6 +438,7 @@ python3 metadata_demo.py --json --expiry-days 1
 - Skips resources that cannot be decrypted
 - Intended for educational/demo use with test data
 - Should not be used with production data
+- Password expiry feature must be enabled in Passbolt administration for expiry dates to display (Pro Edition)
 
 ## Supporting Tools
 

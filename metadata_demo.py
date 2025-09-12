@@ -665,16 +665,16 @@ def main():
                 continue  # Skip resource on error
 
             table.append([
-                meta_name,
-                resource_id[:8],
-                password,
-                totp,
-                custom_fields,
-                username,
-                url,
-                description,
-                icon,
-                expiry
+                meta_name or "",
+                resource_id[:8] if resource_id else "",
+                password or "",
+                totp or "",
+                custom_fields or "",
+                username or "",
+                url or "",
+                description or "",
+                icon or "",
+                expiry or ""
             ])
             
             # Collect JSON data for --json output (expired and near-expiry only)

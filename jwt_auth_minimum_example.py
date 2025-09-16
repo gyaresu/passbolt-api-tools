@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Minimal Passbolt JWT Authentication Example with hardcoded values
+Minimal Passbolt JWT Authentication Example
 
 This script demonstrates the complete JWT authentication flow with Passbolt:
 1. GPG Key Setup: Import and verify your private key
@@ -12,6 +12,12 @@ This script demonstrates the complete JWT authentication flow with Passbolt:
 The authentication process uses GPG encryption to ensure secure communication
 between the client and Passbolt server. This is a requirement for all Passbolt
 API interactions.
+
+Configuration is loaded from .env file with the following variables:
+- USER_ID: Your Passbolt user ID (required)
+- URL: Passbolt server URL (default: https://passbolt.local)
+- KEY_FILE: Path to GPG private key file (default: ada_private.key)
+- PASSPHRASE: GPG key passphrase (default: ada@passbolt.com)
 """
 
 import os
@@ -22,27 +28,45 @@ import subprocess
 import requests
 import tempfile
 import shutil
+from dotenv import load_dotenv
 
 # ============================================================================
 # Configuration
 # ============================================================================
-# These values would typically come from environment variables or a config file
-# in a production environment. They are hardcoded here for demonstration.
-API_URL = "https://passbolt.local"  # Your Passbolt instance URL
-USER_ID = "0460d687-f393-490a-b710-79f333aae3b1"
-PRIVATE_KEY_PATH = "ada_private.key"  # Path to Ada's GPG private key
-KEY_PASSPHRASE = "ada@passbolt.com"  # Ada's GPG key passphrase
+# Load configuration from .env file
+load_dotenv()
+
+# Configuration values from environment variables
+API_URL = os.getenv('URL', 'https://passbolt.local')
+USER_ID = os.getenv('USER_ID')
+PRIVATE_KEY_PATH = os.getenv('KEY_FILE', 'ada_private.key')
+KEY_PASSPHRASE = os.getenv('PASSPHRASE', 'ada@passbolt.com')
 
 # ============================================================================
 # How to get the User ID:
 # 1. Log into Passbolt web interface
 # 2. Go to "Users & Groups"
-# 3. Click on "Ada Lovelace"
+# 3. Click on your user profile
 # 4. The user ID is in the URL path: /app/users/view/{user_id}
-# 5. Example: https://passbolt.local/app/users/view/8599f576-9775-4ebc-a7cb-d102de1d46dd
+# 5. Copy the user ID and add it to your .env file as USER_ID=your-user-id-here
 # ============================================================================
 
 def main():
+    # ============================================================================
+    # Configuration Validation
+    # ============================================================================
+    if not USER_ID:
+        print("Error: USER_ID is required. Please set it in your .env file:")
+        print("  USER_ID=your-user-id-here")
+        return 1
+    
+    if not os.path.exists(PRIVATE_KEY_PATH):
+        print(f"Error: GPG key file not found: {PRIVATE_KEY_PATH}")
+        print(f"Please check that the file exists and the path is correct.")
+        print(f"Current working directory: {os.getcwd()}")
+        print(f"Looking for key file: {os.path.abspath(PRIVATE_KEY_PATH)}")
+        return 1
+    
     # ============================================================================
     # Step 1: GPG Key Setup
     # ============================================================================

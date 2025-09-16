@@ -1,658 +1,250 @@
-# Passbolt API Examples
+# Passbolt API Tools
 
-## Quick Reference
+Tools for Passbolt resource management with encrypted metadata support.
 
-- **JWT authentication and API testing:**
-  `python3 jwt_auth_with_api_test.py`
-- **JWT authentication with Bruno support:**
-  `python3 jwt_api_with_bruno_support.py`
-- **JWT authentication (minimal example):**
-  `python3 jwt_auth_minimum_example.py`
-- **Automatic JWT token refresh:**
-  `python3 loop_refresh_jwt_token.py`
-- **Group management (create groups, manage users, admin permissions):**
-  `python3 group_update.py`
-- **Legacy GPG authentication (shell):**
-  `./passbolt-gpgauth-example.sh`
-- **Decrypt and display all resource metadata/passwords (table/JSON):**
-  `python3 metadata_demo.py`
-- **Encrypt secrets for Bruno API client:**
-  `python3 encrypt_secrets_for_bruno.py`
-
-## Prerequisites
-
-- Python 3.6+
-- GPG 2.1+
-- Bruno API Client (for Bruno integration)
-- Passbolt account with GPG key
-
-## Setup
-
-### GPG Key Setup
-To use these scripts, you'll need your GPG private key from Passbolt:
-
-1. Log into your Passbolt instance
-2. Click on your avatar in the top right
-3. Click "Key Inspector"
-4. Click the "Private" button to export your private key
-5. Save the key file (e.g., `ada_private.key`)
-6. Note your key's fingerprint (shown in the Keys section)
-
-The exported key file and fingerprint will be used in the examples below.
-
-### Getting Your User ID and Fingerprint
-For scripts that require your Passbolt user ID and GPG fingerprint:
-
-**PASSBOLT_USER_ID**: Your unique user ID in Passbolt. Log in to your Passbolt web interface, go to **Users & Groups**, click on your user entry, and look at the URL in your browser. It will look like `https://your-passbolt-instance/app/users/view/8599f576-9775-4ebc-a7cb-d102de1d46dd` - the long string at the end is your user ID.
-
-**GPG_FINGERPRINT**: Your GPG key fingerprint. Log into your Passbolt instance, click on your avatar in the top right, click "Key Inspector", and you'll see your fingerprint in the Keys section (e.g., `03F60E958F4CB29723ACDF761353B5B15D9B054F`).
-
-**Note**: Some scripts (like `jwt_api_with_bruno_support.py` and `jwt_auth_with_api_test.py`) require the private key to be imported into your local GPG keyring for validation. Export your private key from Passbolt, import it with `gpg --import your_private_key.asc`, and the script will validate the fingerprint exists in your keyring before proceeding.
-
-### Python Environment
-```bash
-# Create a new virtual environment
-python3 -m venv venv
-
-# Activate the virtual environment
-# On Unix/macOS:
-source venv/bin/activate
-# On Windows:
-.\venv\Scripts\activate
-
-# Install required packages
-pip3 install requests python-dotenv pyyaml tabulate
-```
-
-### Required Packages
-The scripts require the following external packages:
-```
-requests>=2.32.3
-python-dotenv>=1.0.0
-pyyaml>=6.0.1
-tabulate>=0.9.0
-```
-
-All other dependencies are part of Python's standard library.
-
-## Examples
-
-### 1. JWT Authentication with API Testing
-Script (`jwt_auth_with_api_test.py`) showing:
-- Complete JWT authentication flow
-- API testing capabilities
-- Error handling
-- Token management
-- No Bruno integration
+## Quick Start
 
 ```bash
-# Using a key from GPG keyring
-python3 jwt_auth_with_api_test.py \
-    --url "https://passbolt.local" \
-    --user-id "YOUR_ID" \
-    --fingerprint "YOUR_KEY" \
-    --passphrase "your-passphrase" \
-    --insecure
+# Setup
+cp env.example .env
+# Edit .env with your Passbolt configuration
 
-# Using a local key file
-python3 jwt_auth_with_api_test.py \
-    --url "https://passbolt.local" \
-    --user-id "YOUR_ID" \
-    --key-file "./ada_private.key" \
-    --passphrase "your-passphrase" \
-    --insecure
+# List all resources
+python3 passbolt.py list
 
-# Test API access after authentication
-python3 jwt_auth_with_api_test.py \
-    --url "https://passbolt.local" \
-    --user-id "YOUR_ID" \
-    --fingerprint "YOUR_KEY" \
-    --passphrase "your-passphrase" \
-    --insecure \
-    --test
+# Decrypt and display resources
+python3 passbolt.py decrypt
+
+# Monitor password expiry
+python3 passbolt.py monitor
 ```
 
-### 2. JWT Authentication with Bruno Support
-Script (`jwt_api_with_bruno_support.py`) for Bruno integration:
-- JWT authentication with Passbolt API
-- Bruno API client integration
-- Environment variable management
-- Secret encryption and injection
-- Multiple output formats (Bruno, curl, JSON)
+## Scripts
 
-The script will automatically create and update your Bruno environment file (e.g., `.bruno_env/docker/environments/local.bru`) with:
-```hcl
-vars {
-  host: https://passbolt.local
-  jwt_token: <JWT token>
-  user_id: 8599f576-9775-4ebc-a7cb-d102de1d46dd
-}
-```
+### 1. passbolt.py - Main Resource Management
 
-These variables can then be used in your Bruno requests with `{{host}}`, `{{jwt_token}}`, and `{{user_id}}`.
+Main script for Passbolt resource management with encrypted metadata support.
 
-Note: The script will automatically create the Bruno environment file and directory structure if they don't exist.
+#### Features
+
+- **Resource Creation**: Create resources with encrypted metadata using shared metadata keys
+- **Shared Folder Support**: Share resources with folder users using browser extension approach
+- **Resource Management**: List, view, and manage existing resources
+- **Decryption**: Decrypt resource metadata and secrets (both user_key and shared_key encryption)
+- **Sharing**: Share resources with other users and groups
+- **Monitoring**: Track password expiry dates with JSON export
+- **Educational Mode**: Explanations of authentication and decryption processes
+
+#### Usage
 
 ```bash
-# Basic usage with GPG keyring (local instance)
-python3 jwt_api_with_bruno_support.py \
-    --url "https://passbolt.local" \
-    --user-id "8599f576-9775-4ebc-a7cb-d102de1d46dd" \
-    --fingerprint "03F60E958F4CB29723ACDF761353B5B15D9B054F" \
-    --passphrase "ada@passbolt.com" \
-    --insecure
+# List all accessible resources
+python3 passbolt.py list
 
-# Basic usage with key file (local instance)
-python3 jwt_api_with_bruno_support.py \
-    --url "https://passbolt.local" \
-    --user-id "8599f576-9775-4ebc-a7cb-d102de1d46dd" \
-    --key-file "./ada_private.key" \
-    --passphrase "ada@passbolt.com" \
-    --insecure
+# Show detailed information about a specific resource
+python3 passbolt.py show --resource-id RESOURCE_ID
 
-# With Bruno environment configuration (local instance)
-python3 jwt_api_with_bruno_support.py \
-    --url "https://passbolt.local" \
-    --user-id "8599f576-9775-4ebc-a7cb-d102de1d46dd" \
-    --fingerprint "03F60E958F4CB29723ACDF761353B5B15D9B054F" \
-    --passphrase "ada@passbolt.com" \
-    --insecure \
-    --bruno-format \
-    --bruno-env-path ".bruno_env/docker/environments" \
-    --bruno-env-name "local"
+# Create a new resource in a folder (shared with folder users)
+python3 passbolt.py create \
+    --folder-name "My Folder" \
+    --resource-name "My Resource" \
+    --username "user@example.com" \
+    --password "secret123" \
+    --uri "https://example.com" \
+    --description "Resource description"
 
-# Cloud instance
-python3 jwt_api_with_bruno_support.py \
-    --url "https://cloud.passbolt.com/userexample" \
-    --user-id "YOUR_USER_ID" \
-    --fingerprint "YOUR_GPG_FINGERPRINT" \
-    --passphrase "YOUR_PASSPHRASE"
+# Share a resource with another user
+python3 passbolt.py share \
+    --resource-id RESOURCE_ID \
+    --share-with "user@example.com" \
+    --permission-type 7
+
+# Decrypt and display all resources
+python3 passbolt.py decrypt
+
+# Monitor password expiry (JSON output)
+python3 passbolt.py monitor --json
+
+# List all folders
+python3 passbolt.py folders
+
+# List all users
+python3 passbolt.py users
+
+# Delete a resource
+python3 passbolt.py delete --resource-id RESOURCE_ID
 ```
 
-### 3. Automatic JWT Token Refresh
-Script (`loop_refresh_jwt_token.py`) for automatic JWT token refresh:
-- Runs the JWT authentication script at regular intervals
-- Supports configuration via environment variables or YAML
-- Handles errors and provides status updates
-- Can be configured for different environments
+#### Shared Folder Resource Creation
+
+The script implements the same approach as the Passbolt browser extension for creating resources in shared folders:
+
+1. **Create Resource**: Creates the resource with only the current user's permission initially
+2. **Get Folder Permissions**: Retrieves all users who have access to the folder
+3. **Decrypt Secret**: Decrypts the resource's secret using the metadata private key
+4. **Encrypt for Users**: Encrypts the secret for each user who needs access
+5. **Share Resource**: Calls the share endpoint with both permissions and encrypted secrets
+
+This ensures resources created in shared folders are visible to all intended users.
+
+#### Available Actions
+
+| Action | Description | Requirements |
+|--------|-------------|--------------|
+| `create` | Create a new resource with encrypted metadata | `--resource-name`, `--username`, `--password` |
+| `list` | List all accessible resources | None |
+| `show` | Show detailed information about a specific resource | `--resource-id` |
+| `share` | Share a resource with another user | `--resource-id`, `--share-with` |
+| `decrypt` | Decrypt and display all resources | None |
+| `monitor` | Monitor password expiry dates | None |
+| `folders` | List all folders | None |
+| `users` | List all users | None |
+| `delete` | Delete a resource | `--resource-id` |
+
+#### Technical Actions
+
+- **Authentication**: GPG challenge/response with JWT token generation
+- **Metadata Encryption**: Uses shared metadata keys with multi-key signing
+- **Secret Management**: Handles both individual user secrets and shared metadata keys
+- **API Integration**: Passbolt API v2 compatibility
+- **Error Handling**: Validation and error messages
+
+#### Permission Types
+
+- `1` - Read only
+- `7` - Read + Update (default)
+- `15` - Read + Update + Delete (Owner)
+
+### 2. jwt_auth_minimum_example.py - JWT Authentication
+
+Example of Passbolt JWT authentication using GPG challenge/response.
+
+#### Features
+
+- **GPG Authentication**: Challenge/response flow
+- **JWT Token Generation**: Obtains access and refresh tokens
+- **Environment Configuration**: Uses `.env` file for configuration
+- **Error Handling**: Validation and error messages
+
+#### Usage
 
 ```bash
-# Using environment variables
-python3 loop_refresh_jwt_token.py --env-file .env
-
-# Using command line arguments
-python3 loop_refresh_jwt_token.py \
-    --url "https://passbolt.local" \
-    --user-id "YOUR_ID" \
-    --fingerprint "YOUR_KEY" \
-    --passphrase "your-passphrase" \
-    --insecure \
-    --bruno-format \
-    --bruno-env-path ".bruno_env/docker/environments" \
-    --bruno-env-name "local" \
-    --interval 300
+# Authenticate and get JWT tokens
+python3 jwt_auth_minimum_example.py
 ```
 
-Example `.env` file:
-```env
-URL=https://passbolt.local
-USER_ID=8599f576-9775-4ebc-a7cb-d102de1d46dd
-FINGERPRINT=03F60E958F4CB29723ACDF761353B5B15D9B054F
-PASSPHRASE=ada@passbolt.com
-INSECURE=true
-BRUNO_FORMAT=true
-BRUNO_ENV_PATH=.bruno_env/docker/environments
-BRUNO_ENV_NAME=local
-```
+### 3. group_update.py - Group Management
 
-### 4. Group Management
-Script (`group_update.py`) for creating groups and managing user permissions. The script handles JWT authentication, group creation and management, user addition to existing groups, admin status management, and demonstrates the correct Passbolt API usage patterns.
+Script for creating groups and managing user permissions in Passbolt.
 
-**Key Features:**
-- Create new groups and add users
-- Toggle or set admin status for existing users
-- Remove users from groups
-- Delete groups
-- Demonstrates correct API usage: `user_id` for new users, `id` for existing users
-- Demonstrates the need to GET groups first for relationship IDs
+#### Features
+
+- **Group Creation**: Create new groups or use existing ones
+- **User Management**: Add/remove users from groups
+- **Admin Permissions**: Toggle admin status for group members
+- **Group Deletion**: Remove groups entirely
+
+#### Usage
 
 ```bash
-# Using environment variables
-export PASSBOLT_URL="https://passbolt.local"
-export USER_ID="your-user-id"
-export USER_EMAIL="user@example.com"
-export GROUP_NAME="My Group"
-python3 group_update.py
+# Create a group and add a user
+python3 group_update.py --group-name "My Group" --user-email "user@example.com"
 
-# Using command line arguments
-python3 group_update.py --user-email "user@example.com" --group-name "My Group"
+# Toggle admin status for a user
+python3 group_update.py --group-name "My Group" --user-email "user@example.com" --toggle-admin
 
-# Using both (command line overrides environment)
-export USER_EMAIL="default@example.com"
-python3 group_update.py --user-email "override@example.com"
-
-# Toggle admin status for existing user
-python3 group_update.py --user-email "betty@passbolt.com" --group-name "Test Group" --toggle-admin
-
-# Set specific admin status
-python3 group_update.py --user-email "betty@passbolt.com" --group-name "Test Group" --set-admin true
+# Remove a user from a group
+python3 group_update.py --group-name "My Group" --user-email "user@example.com" --remove-user
 
 # Delete a group
-python3 group_update.py --group-name "Test Group" --delete-group
-
-# Remove user from group
-python3 group_update.py --user-email "betty@passbolt.com" --group-name "Test Group" --remove-user
-
-# Full configuration via command line
-python3 group_update.py \
-    --passbolt-url "https://passbolt.local" \
-    --user-id "your-user-id" \
-    --user-email "user@example.com" \
-    --group-name "My Group" \
-    --private-key "path/to/private.key" \
-    --passphrase "your-passphrase" \
-    --fingerprint "your-fingerprint"
+python3 group_update.py --group-name "My Group" --delete-group
 ```
 
-### 4.1 Passbolt Group API Insights
+## Configuration
 
-This script demonstrates important Passbolt API behavior discovered through testing:
-
-**API Field Usage:**
-- **`user_id`**: Used for adding NEW users to groups
-- **`id`**: Used for modifying EXISTING users in groups (requires GET group first)
-
-**Required Workflow for Existing Users:**
-1. GET the group to obtain relationship IDs: `GET /groups/{id}.json?contain[users]=1`
-2. Extract the `id` field from the user's `_joinData` object
-3. Use that `id` in your update payload
-
-**API Validation:**
-- Cannot mix `user_id` and `id` for the same user in one payload
-- API rejects attempts to add existing users with `user_id`
-- API enforces consistency between new vs existing user operations
-- Removing users requires including the user with `"delete": true` field in the payload
-
-**Example Payloads:**
-
-Adding new user:
-```json
-{
-  "groups_users": [
-    {
-      "user_id": "76ddd3fd-9eec-41c6-83e2-50b1ecb730b8",
-      "is_admin": false
-    }
-  ]
-}
-```
-
-Modifying existing user:
-```json
-{
-  "groups_users": [
-    {
-      "id": "17cfbd1d-d624-4cd5-b62c-e05b87322517",
-      "is_admin": true
-    }
-  ]
-}
-```
-
-Removing existing user:
-```json
-{
-  "groups_users": [
-    {
-      "id": "17cfbd1d-d624-4cd5-b62c-e05b87322517",
-      "delete": true
-    }
-  ]
-}
-```
-
-**Note:** Only include the user to be deleted in the payload, not all users.
-
-This behavior demonstrates the distinction between `user_id` and `id` fields for group operations.
-
-### 5. Legacy GPG Authentication
-Script (`passbolt-gpgauth-example.sh`) for legacy GPG authentication:
-- Traditional GPG authentication
-- Challenge/response flow
-- Session management
-- Basic API interaction
+All scripts use a `.env` file for configuration. Copy `env.example` to `.env` and update with your values:
 
 ```bash
-./passbolt-gpgauth-example.sh
-```
-
-### 6. Resource Metadata Demo (metadata_demo.py)
-
-This script demonstrates Passbolt API integration including JWT authentication, resource decryption, and metadata parsing. It supports both table and JSON output formats, with JSON output specifically designed for monitoring expired and near-expiry resources.
-
-#### Key Features
-- **JWT Authentication**: Complete GPG challenge/response authentication flow
-- **Resource Decryption**: Handles both user_key and shared_key encryption scenarios
-- **Table Output**: Displays all resources in a formatted table with expiry dates
-- **JSON Output**: Filters and outputs only expired and near-expiry resources for monitoring
-- **Educational**: Includes verbose mode with detailed explanations of the authentication and decryption process
-
-#### Setup
-1. Export your private key from Passbolt (see GPG Key Setup above).
-2. Place the key file (e.g., `ada_private.key`) in the project directory.
-3. **Enable password expiry in Passbolt**: Go to `/app/administration/password-expiry` in your Passbolt instance and enable the password expiry feature. This is a Pro Edition feature required for expiry dates to be displayed. See the [Passbolt Password Expiry documentation](https://www.passbolt.com/docs/admin/password-configuration/password-expiry/#expiry-policies) for details.
-4. Copy the example environment file and configure it:
-```bash
-cp env.example .env
-```
-5. Edit the `.env` file with your configuration:
-```env
-# Passbolt Configuration
-# Copy this file to .env and update with your values
-
 # Required: Passbolt user ID
-USER_ID=33c6ef32-c367-4287-9721-be6845231688
+USER_ID=your-user-id-here
 
 # Optional: Passbolt server URL (default: https://passbolt.local)
 URL=https://passbolt.local
 
 # Optional: Path to GPG private key file (default: ada_private.key)
-KEY_FILE=ada_private.key
+KEY_FILE=your_private.key
 
 # Optional: GPG key passphrase (default: ada@passbolt.com)
-PASSPHRASE=ada@passbolt.com
+PASSPHRASE=your-passphrase
 ```
 
-#### Usage
+## Prerequisites
 
-**Table Output (Default):**
+- **Passbolt instance** with encrypted metadata support
+- **Python 3.7+** with virtual environment
+- **GPG** installed and configured
+- **Valid Passbolt user account** with GPG key
+
+## Setup
+
+1. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd passbolt-api-tools
+   ```
+
+2. **Create virtual environment**:
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+
+3. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Configure environment**:
+   ```bash
+   cp env.example .env
+   # Edit .env with your Passbolt configuration
+   ```
+
+5. **Test authentication**:
+   ```bash
+   python3 jwt_auth_minimum_example.py
+   ```
+
+## Requirements
+
+The project uses these Python packages:
+
+- `requests` - HTTP client for API calls
+- `python-dotenv` - Environment variable management
+- `PyYAML` - YAML configuration support
+- `tabulate` - Pretty table formatting
+
+Install with:
 ```bash
-# Using .env file
-python3 metadata_demo.py
-
-# Using command line arguments
-python3 metadata_demo.py --user-id 33c6ef32-c367-4287-9721-be6845231688
-
-# With verbose explanations
-python3 metadata_demo.py -v
+pip install -r requirements.txt
 ```
 
-**JSON Output for Monitoring:**
-```bash
-# Default 30-day expiry threshold
-python3 metadata_demo.py --json
+## License
 
-# Custom 7-day threshold
-python3 metadata_demo.py --json --expiry-days 7
-
-# Very strict 1-day threshold
-python3 metadata_demo.py --json --expiry-days 1
-```
-
-#### Output Formats
-
-**Table Output:**
-- Shows all accessible resources in a formatted table
-- Columns: Name, ID, Password, TOTP, Custom Fields, Username, URL, Description, Icon, Expiry
-- Includes expiry dates in ISO 8601 format
-
-**JSON Output:**
-- Filters for expired and near-expiry resources only
-- Saves to `passbolt_resources.json`
-- Includes: resource ID, name, owner, owner email, expiration date, status
-- Data sources: resources table (ID, expiration), users table (owner info), decrypted metadata (name)
-- Default expiry period: 90 days (configurable in Passbolt Pro administration)
-
-**Sample JSON Output:**
-```json
-{
-  "metadata": {
-    "processed_at": "2025-09-05T10:07:00.193061",
-    "total_resources": 1,
-    "authenticated_user": "Ada Lovelace",
-    "filter": {
-      "expired_resources": true,
-      "near_expiry_days": 7
-    }
-  },
-  "resources": [
-    {
-      "resource_id": "26b62344-572d-4a44-a72c-9d7b6e5788c1",
-      "name": "shared test",
-      "owner": "Ada Lovelace",
-      "owner_email": "ada@passbolt.com",
-      "expiration": "2025-09-04T23:49:33+00:00",
-      "status": "expired"
-    }
-  ]
-}
-```
-
-#### Educational Features
-- **Verbose Mode (`-v`)**: Shows detailed step-by-step explanations of the authentication and decryption process
-- **Debug Mode (`--debug`)**: Displays API request/response details for learning
-- **Technical Comments**: Inline documentation explaining GPG operations, encryption types, and data flow
-
-#### Security Notes
-- Uses isolated GPG keyrings for security
-- Skips resources that cannot be decrypted
-- Intended for educational/demo use with test data
-- Should not be used with production data
-- Password expiry feature must be enabled in Passbolt administration for expiry dates to display (Pro Edition)
-
-## Supporting Tools
-
-### Secret Encryption for Bruno
-A utility script (`encrypt_secrets_for_bruno.py`) for encrypting Passbolt API payloads:
-- **Purpose**: Passbolt requires all secret data in API requests to be encrypted with GPG
-- **Functionality**:
-  - Encrypts secret data using GPG for Passbolt API requests
-  - Injects encrypted secrets into Bruno request files
-  - Updates Bruno request metadata with encryption details
-  - Handles both single secrets and complex JSON payloads
-
-Note: The Bruno request file must already exist and contain a valid JSON body section. The script will not create new request files.
-
-#### Bruno Request File Requirements
-The Bruno request file must:
-1. Exist before running the script
-2. Contain a `body:json` section
-3. Have a JSON body with a `secrets` array
-4. Follow the Passbolt API payload format
-
-Example Bruno request file structure:
-```hcl
-meta {
-  name: Create Secret
-  type: http
-  seq: 1
-}
-
-post {
-  url: {{host}}/resources.json
-  body: json
-  auth: inherit
-}
-
-headers {
-  Authorization: Bearer {{jwt_token}}
-  Content-Type: application/json
-  Accept: application/json
-}
-
-body:json {
-  {
-    "name": "Secret Name",
-    "username": "username",
-    "uri": "https://example.com",
-    "description": "Secret description",
-    "secrets": [
-      {
-        "user_id": "{{user_id}}",
-        "data": "-----BEGIN PGP MESSAGE-----\n...encrypted data...\n-----END PGP MESSAGE-----"
-      }
-    ]
-  }
-}
-```
-
-Note: The double braces in the `body:json` section are part of Bruno's configuration format and are required. The outer braces are for Bruno's configuration, while the inner braces contain the actual JSON payload.
-
-#### Passbolt Payload Format
-When sending encrypted data to Passbolt, the payload must follow this structure:
-
-```json
-{
-  "name": "Secret Name",
-  "username": "username",
-  "uri": "https://example.com",
-  "description": "Secret description",
-  "secrets": [
-    {
-      "user_id": "recipient-user-id",
-      "data": "-----BEGIN PGP MESSAGE-----\n...encrypted data...\n-----END PGP MESSAGE-----"
-    }
-  ]
-}
-```
-
-The script handles this by:
-1. Encrypting the secret value with GPG
-2. Wrapping it in the required JSON structure
-3. Injecting it into the Bruno request file
-
-#### Use Cases
-- Creating new secrets in Passbolt
-- Updating existing secrets
-- Sharing secrets with other users
-- Any API request requiring encrypted payloads
-
-```bash
-# Basic password secret
-python3 encrypt_secrets_for_bruno.py \
-    --secret "my-secret" \
-    --fingerprint "03F60E958F4CB29723ACDF761353B5B15D9B054F" \
-    --bruno-file ".bruno_env/docker/requests/Create Secret.bru" \
-    --name "Secret Name" \
-    --username "username" \
-    --uri "https://example.com" \
-    --description "Secret description"
-```
-
-The script will update the Bruno request body to:
-```json
-{
-  "name": "Secret Name",
-  "username": "username",
-  "uri": "https://example.com",
-  "description": "Secret description",
-  "secrets": [
-    {
-      "data": "-----BEGIN PGP MESSAGE-----\n...encrypted data...\n-----END PGP MESSAGE-----",
-      "user_id": "{{user_id}}"
-    }
-  ]
-}
-```
-
-```bash
-# API key with service metadata
-python3 encrypt_secrets_for_bruno.py \
-    --secret "<STRIPE KEY>" \
-    --fingerprint "03F60E958F4CB29723ACDF761353B5B15D9B054F" \
-    --bruno-file ".bruno_env/docker/requests/Create Secret.bru" \
-    --name "Stripe API Key" \
-    --username "stripe-service" \
-    --uri "https://api.stripe.com" \
-    --description "Production Stripe API Key"
-```
-
-The script will update the Bruno request body to:
-```json
-{
-  "name": "Stripe API Key",
-  "username": "stripe-service",
-  "uri": "https://api.stripe.com",
-  "description": "Production Stripe API Key",
-  "secrets": [
-    {
-      "data": "-----BEGIN PGP MESSAGE-----\n...encrypted data...\n-----END PGP MESSAGE-----",
-      "user_id": "{{user_id}}"
-    }
-  ]
-}
-```
-
-Note: The `--secret` parameter is the actual secret value (password, API key, etc.) that needs to be encrypted. The metadata (name, username, uri, description) are provided as separate parameters. The actual API endpoint is configured in the Bruno request file. The `{{user_id}}` placeholder will be replaced with the actual user ID when the request is made.
-
-## Security Notes
-
-- Always use HTTPS for Passbolt server URLs
-- Keep GPG private keys secure
-- Use strong passphrases
-- Don't share tokens or passphrases
-- Clean up temporary files after use
-- Use `--insecure` flag only for local development with self-signed certificates
-- Never use `--insecure` with production or cloud instances
-
-## Documentation
-
-### Script Documentation
-Each script includes help documentation that can be accessed using Python's built-in help system:
-
-```bash
-# View full script documentation
-python3 -c "import jwt_auth_with_api_test; help(jwt_auth_with_api_test)"
-python3 -c "import jwt_api_with_bruno_support; help(jwt_api_with_bruno_support)"
-python3 -c "import jwt_auth_minimum_example; help(jwt_auth_minimum_example)"
-python3 -c "import metadata_demo; help(metadata_demo)"
-python3 -c "import group_update; help(group_update)"
-python3 -c "import encrypt_secrets_for_bruno; help(encrypt_secrets_for_bruno)"
-python3 -c "import loop_refresh_jwt_token; help(loop_refresh_jwt_token)"
-python3 -c "import passbolt-gpgauth-example; help(passbolt-gpgauth-example)"
-
-# View specific function documentation
-python3 -c "from jwt_auth_with_api_test import check_gpg_key_validity; help(check_gpg_key_validity)"
-```
-
-The help documentation includes:
-- Detailed explanation of the authentication process
-- Command-line options and usage examples
-- Security notes and best practices
-- Error handling and troubleshooting
-
-#### Quick Reference
-| Script | Purpose | Key Features |
-|--------|---------|--------------|
-| `jwt_auth_with_api_test.py` | Complete JWT auth | CLI args, error handling, API testing |
-| `jwt_api_with_bruno_support.py` | Bruno integration | Environment vars, token injection |
-| `jwt_auth_minimum_example.py` | Minimal JWT auth | Basic authentication flow |
-| `metadata_demo.py` | Resource metadata demo | Table/JSON output, expiry monitoring, educational mode |
-| `group_update.py` | Group management | User addition/removal, admin management, group deletion, API validation |
-| `encrypt_secrets_for_bruno.py` | Secret encryption | GPG encryption, Bruno request handling |
-| `loop_refresh_jwt_token.py` | Automatic JWT token refresh | Environment vars, YAML configuration |
-| `passbolt-gpgauth-example.sh` | Legacy GPG auth | Traditional auth flow |
-
-### External Documentation
-- [Passbolt API Documentation](https://www.passbolt.com/docs/api/)
-- [JWT Authentication Guide](https://www.passbolt.com/docs/development/authentication/#jwt-authentication)
-- [GPG Authentication Guide](https://www.passbolt.com/docs/development/authentication/#gpgauth)
-- [Bruno API Client](https://www.usebruno.com/)
+This project is licensed under the GNU Affero General Public License v3 - see the LICENSE file for details.
 
 ## Contributing
 
 1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a new Pull Request
+2. Create a feature branch
+3. Make your changes
+4. Test your changes
+5. Submit a pull request
 
-## License
+## Support
 
-This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License (AGPL) as published by the Free Software Foundation version 3.
-
-The name "Passbolt" is a registered trademark of Passbolt SA, and Passbolt SA hereby declines to grant a trademark license to "Passbolt" pursuant to the GNU Affero General Public License version 3 Section 7(e), without a separate agreement with Passbolt SA.
-
-This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License along with this program. If not, see [GNU Affero General Public License v3](https://www.gnu.org/licenses/agpl-3.0.html).
+For issues and questions:
+1. Check the script help: `python3 <script>.py --help`
+2. Review the configuration in `.env`
+3. Test with the JWT authentication script first
+4. Check Passbolt server logs for API errors

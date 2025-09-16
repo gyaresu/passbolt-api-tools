@@ -3,15 +3,14 @@
 Script to create a group and manage user permissions in Passbolt.
 Uses JWT authentication and handles existing groups and admin status changes.
 
-Configuration:
-- Set environment variables or modify the constants below
-- PASSBOLT_URL: Your Passbolt instance URL
-- USER_ID: Your Passbolt user ID
-- USER_EMAIL: Email of the user to add to the group
-- GROUP_NAME: Name of the group to create/use
-- PRIVATE_KEY_PATH: Path to your GPG private key file
-- KEY_PASSPHRASE: Your GPG key passphrase
-- USER_FPR: Your GPG key fingerprint
+Configuration is loaded from .env file with the following variables:
+- USER_ID: Your Passbolt user ID (required)
+- URL: Passbolt server URL (default: https://passbolt.local)
+- KEY_FILE: Path to GPG private key file (default: ada_private.key)
+- PASSPHRASE: GPG key passphrase (default: ada@passbolt.com)
+- USER_EMAIL: Email of the user to add to the group (default: betty@passbolt.com)
+- GROUP_NAME: Name of the group to create/use (default: Test Group)
+- USER_FPR: Your GPG key fingerprint (default: 03F60E958F4CB29723ACDF761353B5B15D9B054F)
 
 Usage Examples:
     # Using environment variables
@@ -47,13 +46,43 @@ import subprocess
 import requests
 import urllib3
 import argparse
+from dotenv import load_dotenv
 
 # Suppress SSL warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def parse_arguments():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Create a Passbolt group and manage user permissions")
+    parser = argparse.ArgumentParser(
+        description="Create a Passbolt group and manage user permissions",
+        epilog='''
+Examples:
+  # Add a user to a group
+  %(prog)s --user-email "user@example.com" --group-name "My Group"
+  
+  # Toggle admin status for existing user
+  %(prog)s --user-email "user@example.com" --group-name "My Group" --toggle-admin
+  
+  # Remove user from group
+  %(prog)s --user-email "user@example.com" --group-name "My Group" --remove-user
+  
+  # Delete entire group
+  %(prog)s --group-name "My Group" --delete-group
+  
+  # Set specific admin status
+  %(prog)s --user-email "user@example.com" --group-name "My Group" --set-admin true
+
+Configuration:
+  Set up a .env file with:
+  USER_ID=your-user-id-here
+  URL=https://passbolt.local
+  KEY_FILE=your_private.key
+  PASSPHRASE=your-passphrase
+  USER_EMAIL=default@example.com
+  GROUP_NAME=Default Group
+        ''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--user-email", help="Email of the user to add to the group")
     parser.add_argument("--group-name", help="Name of the group to create/use")
     parser.add_argument("--passbolt-url", help="Passbolt instance URL")
@@ -71,13 +100,16 @@ def parse_arguments():
                        help="Remove the specified user from the group")
     return parser.parse_args()
 
+# Load configuration from .env file
+load_dotenv()
+
 # Configuration - Set these or use environment variables
-PASSBOLT_URL = os.getenv("PASSBOLT_URL", "https://passbolt.local")
-USER_ID = os.getenv("USER_ID", "d2385e03-490c-4318-9bc0-d7c309657b30")  # Your user ID
+PASSBOLT_URL = os.getenv("URL", "https://passbolt.local")
+USER_ID = os.getenv("USER_ID", "8baca8bd-3bde-4ab6-96d6-f65492ce2791")  # Ada's user ID
 USER_EMAIL = os.getenv("USER_EMAIL", "betty@passbolt.com")  # User to add to group
 GROUP_NAME = os.getenv("GROUP_NAME", "Test Group")  # Group name
-PRIVATE_KEY_PATH = os.getenv("PRIVATE_KEY_PATH", "ada_private.key")  # Your private key
-KEY_PASSPHRASE = os.getenv("KEY_PASSPHRASE", "ada@passbolt.com")  # Your passphrase
+PRIVATE_KEY_PATH = os.getenv("KEY_FILE", "ada_private.key")  # Your private key
+KEY_PASSPHRASE = os.getenv("PASSPHRASE", "ada@passbolt.com")  # Your passphrase
 USER_FPR = os.getenv("USER_FPR", "03F60E958F4CB29723ACDF761353B5B15D9B054F")  # Your fingerprint
 
 def import_private_key(key_path):
@@ -88,7 +120,7 @@ def import_private_key(key_path):
 def get_jwt_token():
     """Get JWT token using GPG authentication."""
     session = requests.Session()
-    resp = session.get(f"{PASSBOLT_URL}/auth/verify.json", verify=False)
+    resp = session.get(f"{PASSBOLT_URL}/auth/verify.json?api-version=v2", verify=False)
     resp.raise_for_status()
     data = resp.json()
 
@@ -150,7 +182,7 @@ def get_jwt_token():
         "X-CSRF-Token": csrf_token
     }
 
-    resp = session.post(f"{PASSBOLT_URL}/auth/jwt/login.json", headers=headers, json=login_body, verify=False)
+    resp = session.post(f"{PASSBOLT_URL}/auth/jwt/login.json?api-version=v2", headers=headers, json=login_body, verify=False)
     resp.raise_for_status()
     data = resp.json()
 
@@ -177,7 +209,9 @@ def get_jwt_token():
 
 def api_get(path, jwt_token):
     """Helper function for GET requests."""
-    url = f"{PASSBOLT_URL}{path}"
+    # Add API version if not already present
+    separator = "&" if "?" in path else "?"
+    url = f"{PASSBOLT_URL}{path}{separator}api-version=v2"
     headers = {
         "Authorization": f"Bearer {jwt_token}",
         "Accept": "application/json"
@@ -186,12 +220,14 @@ def api_get(path, jwt_token):
     if resp.status_code != 200:
         print(f"[!] API Error: {resp.status_code}")
         print(f"[!] Response: {resp.text}")
-        resp.raise_for_status()
+    resp.raise_for_status()
     return resp.json()
 
 def api_post(path, data, jwt_token):
     """Helper function for POST requests."""
-    url = f"{PASSBOLT_URL}{path}"
+    # Add API version if not already present
+    separator = "&" if "?" in path else "?"
+    url = f"{PASSBOLT_URL}{path}{separator}api-version=v2"
     headers = {
         "Authorization": f"Bearer {jwt_token}",
         "Accept": "application/json",
@@ -201,12 +237,14 @@ def api_post(path, data, jwt_token):
     if resp.status_code != 200:
         print(f"[!] API Error: {resp.status_code}")
         print(f"[!] Response: {resp.text}")
-        resp.raise_for_status()
+    resp.raise_for_status()
     return resp.json()
 
 def api_put(path, data, jwt_token):
     """Helper function for PUT requests."""
-    url = f"{PASSBOLT_URL}{path}"
+    # Add API version if not already present
+    separator = "&" if "?" in path else "?"
+    url = f"{PASSBOLT_URL}{path}{separator}api-version=v2"
     headers = {
         "Authorization": f"Bearer {jwt_token}",
         "Accept": "application/json",
@@ -216,12 +254,14 @@ def api_put(path, data, jwt_token):
     if resp.status_code != 200:
         print(f"[!] API Error: {resp.status_code}")
         print(f"[!] Response: {resp.text}")
-        resp.raise_for_status()
+    resp.raise_for_status()
     return resp.json()
 
 def api_delete(path, jwt_token):
     """Helper function for DELETE requests."""
-    url = f"{PASSBOLT_URL}{path}"
+    # Add API version if not already present
+    separator = "&" if "?" in path else "?"
+    url = f"{PASSBOLT_URL}{path}{separator}api-version=v2"
     headers = {
         "Authorization": f"Bearer {jwt_token}",
         "Accept": "application/json"
@@ -230,38 +270,63 @@ def api_delete(path, jwt_token):
     if resp.status_code != 200:
         print(f"[!] API Error: {resp.status_code}")
         print(f"[!] Response: {resp.text}")
-        resp.raise_for_status()
+    resp.raise_for_status()
     return resp.json()
 
 def main():
     # Parse command line arguments
     args = parse_arguments()
+    
+    # Check if any explicit action is provided
+    has_explicit_action = any([
+        args.user_email,
+        args.group_name,
+        args.toggle_admin,
+        args.set_admin is not None,
+        args.delete_group,
+        args.remove_user
+    ])
+    
+    # If no explicit action, show help and exit
+    if not has_explicit_action:
+        print("Error: No action specified. This script requires explicit parameters for safety.")
+        print("\nUse --help to see available options and examples.")
+        print("\nQuick examples:")
+        print("  # Add a user to a group")
+        print("  python group_update.py --user-email 'user@example.com' --group-name 'My Group'")
+        print("  # List groups (requires explicit parameters)")
+        print("  python group_update.py --group-name 'Test Group' --user-email 'betty@passbolt.com'")
+        return 1
+    
+    # Configuration validation
+    if not USER_ID:
+        print("Error: USER_ID is required. Please set it in your .env file:")
+        print("  USER_ID=your-user-id-here")
+        return 1
+    
+    if not os.path.exists(PRIVATE_KEY_PATH):
+        print(f"Error: GPG key file not found: {PRIVATE_KEY_PATH}")
+        print(f"Please check that the file exists and the path is correct.")
+        print(f"Current working directory: {os.getcwd()}")
+        print(f"Looking for key file: {os.path.abspath(PRIVATE_KEY_PATH)}")
+        return 1
 
     # Override configuration with command line arguments
-    global PASSBOLT_URL, USER_ID, USER_EMAIL, GROUP_NAME, PRIVATE_KEY_PATH, KEY_PASSPHRASE, USER_FPR
-
-    if args.passbolt_url:
-        PASSBOLT_URL = args.passbolt_url
-    if args.user_id:
-        USER_ID = args.user_id
-    if args.user_email:
-        USER_EMAIL = args.user_email
-    if args.group_name:
-        GROUP_NAME = args.group_name
-    if args.private_key:
-        PRIVATE_KEY_PATH = args.private_key
-    if args.passphrase:
-        KEY_PASSPHRASE = args.passphrase
-    if args.fingerprint:
-        USER_FPR = args.fingerprint
+    passbolt_url = args.passbolt_url or PASSBOLT_URL
+    user_id = args.user_id or USER_ID
+    user_email = args.user_email or USER_EMAIL
+    group_name = args.group_name or GROUP_NAME
+    private_key_path = args.private_key or PRIVATE_KEY_PATH
+    key_passphrase = args.passphrase or KEY_PASSPHRASE
+    user_fpr = args.fingerprint or USER_FPR
 
     print("=== Passbolt Group User Test ===")
-    print(f"Target User: {USER_EMAIL}")
-    print(f"Group Name: {GROUP_NAME}")
+    print(f"Target User: {user_email}")
+    print(f"Group Name: {group_name}")
     print()
 
     # Validate configuration
-    if not all([PASSBOLT_URL, USER_ID, USER_EMAIL, GROUP_NAME, PRIVATE_KEY_PATH, KEY_PASSPHRASE, USER_FPR]):
+    if not all([passbolt_url, user_id, user_email, group_name, private_key_path, key_passphrase, user_fpr]):
         print("[!] Error: Missing required configuration. Please set all environment variables or update the constants.")
         return
 

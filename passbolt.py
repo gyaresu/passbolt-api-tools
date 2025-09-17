@@ -2,33 +2,52 @@
 """
 Passbolt Resource Management
 
-This script demonstrates how to interact with the Passbolt API for resource management.
-It covers authentication, resource creation, decryption, and sharing operations.
+Technical implementation of Passbolt API interactions for resource and metadata key management.
+Handles v5 resources with shared metadata keys and individual user secrets.
 
 RESOURCE METADATA STRUCTURE:
-Resources store metadata in encrypted form. The metadata JSON structure must include:
-- object_type: "PASSBOLT_RESOURCE_METADATA" (required for web UI visibility)
-- name: string
-- username: string  
-- uris: array of strings (not single string)
-- description: string
-- resource_type_id: UUID string (included in metadata, not just resource)
-- custom_fields: array of objects (empty array if none)
+v5 resources use shared metadata keys for metadata encryption. Metadata JSON requires:
+- object_type: "PASSBOLT_RESOURCE_METADATA" (web UI parsing requirement)
+- name: string (resource display name)
+- username: string (login username)  
+- uris: array of strings (web UI expects array format)
+- description: string (resource description)
+- resource_type_id: UUID (must be included in metadata for proper type association)
+- custom_fields: array (additional fields, empty if none)
 
-ENCRYPTION REQUIREMENTS:
-- Metadata encrypted with shared metadata key public key
-- Metadata signed with both user private key and metadata private key
-- Secrets encrypted with individual user public keys
-- Uses GPG with armor format for ASCII output
-- Metadata private key is itself encrypted with user's public key
+ENCRYPTION ARCHITECTURE:
+- Metadata: encrypted with shared metadata public key, signed with user private key
+- Secrets: encrypted individually per user with their public key as JSON {password, description}
+- GPG operations: use --armor for ASCII, --trust-model always, isolated temporary keyring
+- Sharing: requires encrypted secrets for all users with resource access (API requirement)
 
-SHARED FOLDER RESOURCE CREATION:
-- Resources created with only current user's permission initially
-- After creation, shared with folder users using browser extension approach:
-  1. Get resource's secret (encrypted with metadata key)
-  2. Decrypt using metadata private key
-  3. Encrypt for each user who needs access
-  4. Call share endpoint with both permissions and secrets
+RESOURCE CREATION WORKFLOW:
+1. Authenticate via GPG challenge/response to obtain JWT token
+2. Retrieve shared metadata keys user has access to
+3. Import metadata public key and user public key to temporary GPG keyring
+4. Create metadata JSON with PASSBOLT_RESOURCE_METADATA structure
+5. Encrypt metadata with metadata public key, sign with user private key
+6. Encrypt secret JSON object with user's public key
+7. POST to /resources.json with encrypted metadata and secret
+8. Resource created with current user permission only (no initial sharing)
+
+SHARED FOLDER WORKFLOW:
+When creating in shared folders, additional sharing occurs post-creation:
+1. Retrieve folder permissions to identify users with folder access
+2. Get created resource's secret (encrypted with current user's key)
+3. Decrypt secret using current user's private key in temporary GPG keyring
+4. For each folder user: encrypt secret with their public key
+5. PUT to /share/resource/{id}.json with permissions array and secrets array
+6. API validates all users have encrypted secrets before allowing share
+
+METADATA KEY SHARING WORKFLOW:
+Admin users can share metadata keys with users who lack access:
+1. Retrieve metadata keys current user has private key access to
+2. Get target user's public key and import to temporary GPG keyring
+3. For each metadata key: decrypt private key using current user's private key
+4. Re-encrypt decrypted private key data for target user's public key
+5. POST to /metadata/keys/privates.json with array of {metadata_key_id, user_id, data}
+6. Target user gains ability to decrypt metadata for shared resources
 
 API ENDPOINTS:
 - /auth/jwt/login.json - JWT authentication
@@ -78,10 +97,16 @@ DEFAULT_GPG_HOME_PREFIX = os.getenv('PASSBOLT_GPG_HOME_PREFIX', 'passbolt_gpg_')
 
 def api_get(path, jwt_token=None, passbolt_url=None, debug=False, params=None):
     """
-    Make authenticated GET request to Passbolt API.
+    Execute GET request to Passbolt API with automatic v2 versioning.
     
-    Automatically appends ?api-version={DEFAULT_API_VERSION} for v2 API compatibility.
-    Handles existing query parameters and includes JWT token in Authorization header.
+    Technical details:
+    - Automatically appends ?api-version=v2 if not present in path
+    - Uses Bearer token authentication in Authorization header
+    - Accepts application/json content type
+    - Raises HTTPError on non-200 status codes
+    - Returns parsed JSON response body
+    
+    Path examples: /resources.json, /users/me.json, /metadata/keys.json
     """
     if passbolt_url is None:
         passbolt_url = DEFAULT_PASSBOLT_URL
@@ -101,7 +126,14 @@ def api_get(path, jwt_token=None, passbolt_url=None, debug=False, params=None):
         print(f"GET {url}")
         print(f"Headers: {headers}")
     
-    resp = requests.get(url, headers=headers, verify=False)
+    try:
+        resp = requests.get(url, headers=headers, verify=False, timeout=30)
+    except requests.exceptions.ConnectionError:
+        raise Exception(f"Connection failed: Unable to connect to {passbolt_url}. Check server is running and URL is correct.")
+    except requests.exceptions.Timeout:
+        raise Exception(f"Request timeout: Server at {passbolt_url} did not respond within 30 seconds.")
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Network error: {str(e)}")
     
     if debug:
         print(f"Response Status: {resp.status_code}")
@@ -114,8 +146,20 @@ def api_get(path, jwt_token=None, passbolt_url=None, debug=False, params=None):
         else:
             print(f"Error Response: {resp.text}")
     
-    resp.raise_for_status()
-    return resp.json()
+    try:
+        resp.raise_for_status()
+        return resp.json()
+    except requests.exceptions.HTTPError as e:
+        error_msg = f"API Error ({e.response.status_code})"
+        try:
+            error_data = e.response.json()
+            if 'header' in error_data and 'message' in error_data['header']:
+                error_msg += f": {error_data['header']['message']}"
+            elif 'body' in error_data:
+                error_msg += f": {error_data['body']}"
+        except:
+            error_msg += f": {e.response.text[:200]}"
+        raise requests.exceptions.HTTPError(error_msg, response=e.response)
 
 def api_post(path, data, jwt_token=None, passbolt_url=None, debug=False):
     """
@@ -136,15 +180,34 @@ def api_post(path, data, jwt_token=None, passbolt_url=None, debug=False):
         print(f"Headers: {headers}")
         print(f"Data: {json.dumps(data, indent=2)}")
     
-    resp = requests.post(url, headers=headers, json=data, verify=False)
+    try:
+        resp = requests.post(url, headers=headers, json=data, verify=False, timeout=30)
+    except requests.exceptions.ConnectionError:
+        raise Exception(f"Connection failed: Unable to connect to {passbolt_url}. Check server is running and URL is correct.")
+    except requests.exceptions.Timeout:
+        raise Exception(f"Request timeout: Server at {passbolt_url} did not respond within 30 seconds.")
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Network error: {str(e)}")
     
     if debug:
         print(f"Response Status: {resp.status_code}")
         if resp.status_code not in [200, 201]:
             print(f"Error Response: {resp.text}")
     
-    resp.raise_for_status()
-    return resp.json()
+    try:
+        resp.raise_for_status()
+        return resp.json()
+    except requests.exceptions.HTTPError as e:
+        error_msg = f"API Error ({e.response.status_code})"
+        try:
+            error_data = e.response.json()
+            if 'header' in error_data and 'message' in error_data['header']:
+                error_msg += f": {error_data['header']['message']}"
+            elif 'body' in error_data:
+                error_msg += f": {error_data['body']}"
+        except:
+            error_msg += f": {e.response.text[:200]}"
+        raise requests.exceptions.HTTPError(error_msg, response=e.response)
 
 def api_put(path, data, jwt_token=None, passbolt_url=None, debug=False):
     """
@@ -165,15 +228,34 @@ def api_put(path, data, jwt_token=None, passbolt_url=None, debug=False):
         print(f"Headers: {headers}")
         print(f"Data: {json.dumps(data, indent=2)}")
     
-    resp = requests.put(url, headers=headers, json=data, verify=False)
+    try:
+        resp = requests.put(url, headers=headers, json=data, verify=False, timeout=30)
+    except requests.exceptions.ConnectionError:
+        raise Exception(f"Connection failed: Unable to connect to {passbolt_url}. Check server is running and URL is correct.")
+    except requests.exceptions.Timeout:
+        raise Exception(f"Request timeout: Server at {passbolt_url} did not respond within 30 seconds.")
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Network error: {str(e)}")
     
     if debug:
         print(f"Response Status: {resp.status_code}")
         if resp.status_code not in [200, 201]:
             print(f"Error Response: {resp.text}")
     
-    resp.raise_for_status()
-    return resp.json()
+    try:
+        resp.raise_for_status()
+        return resp.json()
+    except requests.exceptions.HTTPError as e:
+        error_msg = f"API Error ({e.response.status_code})"
+        try:
+            error_data = e.response.json()
+            if 'header' in error_data and 'message' in error_data['header']:
+                error_msg += f": {error_data['header']['message']}"
+            elif 'body' in error_data:
+                error_msg += f": {error_data['body']}"
+        except:
+            error_msg += f": {e.response.text[:200]}"
+        raise requests.exceptions.HTTPError(error_msg, response=e.response)
 
 def api_delete(path, jwt_token=None, passbolt_url=None, debug=False):
     """
@@ -193,7 +275,14 @@ def api_delete(path, jwt_token=None, passbolt_url=None, debug=False):
         print(f"DELETE {url}")
         print(f"Headers: {headers}")
     
-    resp = requests.delete(url, headers=headers, verify=False)
+    try:
+        resp = requests.delete(url, headers=headers, verify=False, timeout=30)
+    except requests.exceptions.ConnectionError:
+        raise Exception(f"Connection failed: Unable to connect to {passbolt_url}. Check server is running and URL is correct.")
+    except requests.exceptions.Timeout:
+        raise Exception(f"Request timeout: Server at {passbolt_url} did not respond within 30 seconds.")
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Network error: {str(e)}")
     
     if debug:
         print(f"Response Status: {resp.status_code}")
@@ -209,17 +298,20 @@ def api_delete(path, jwt_token=None, passbolt_url=None, debug=False):
 
 def authenticate_with_passbolt(user_id, key_file, passphrase, passbolt_url, gpg_home, debug=False, verbose=False):
     """
-    Authenticate with Passbolt using JWT authentication.
+    Authenticate with Passbolt using GPG challenge/response to obtain JWT token.
     
-    Implements GPG challenge/response authentication flow:
-    1. Get server's public key and fingerprint from /auth/verify.json
-    2. Import server key and user's private key into GPG keyring
-    3. Create challenge with random token and configurable expiry
-    4. Encrypt and sign challenge using server's public key
-    5. Submit challenge to /auth/jwt/login.json
-    6. Decrypt response to get JWT token
+    Technical process:
+    1. GET /auth/verify.json retrieves server public key and fingerprint
+    2. Import server public key and user private key to isolated GPG keyring
+    3. Generate challenge payload: {version, domain, verify_token (UUID), verify_token_expiry}
+    4. GPG encrypt+sign challenge: --recipient server_fpr --local-user user_fpr
+    5. POST encrypted challenge to /auth/jwt/login.json with user_id and CSRF token
+    6. Server returns encrypted response containing JWT access_token
+    7. GPG decrypt server response using user private key
+    8. Extract access_token from decrypted JSON for API authentication
     
-    Uses temporary GPG home directory for isolation.
+    All GPG operations use temporary keyring to avoid OS keyring contamination.
+    Challenge expires in 5 minutes (configurable via PASSBOLT_CHALLENGE_EXPIRY).
     """
     if verbose:
         print("JWT Authentication Process:")
@@ -424,13 +516,22 @@ def get_user_public_key(user_id, jwt_token, passbolt_url, debug=False):
 
 def get_shared_metadata_keys(jwt_token, passbolt_url, debug=False):
     """
-    Get shared metadata keys that the user has access to.
+    Retrieve shared metadata keys with current user's encrypted private key access.
     
-    Uses /metadata/keys.json endpoint with contain[metadata_private_keys]=1 to include
-    private key data and filter[deleted]=0 to exclude deleted keys.
+    Technical details:
+    - GET /metadata/keys.json?contain[metadata_private_keys]=1&filter[deleted]=0
+    - Response includes metadata_private_keys array containing private keys encrypted for each user
+    - Each user has their own encrypted copy of the same metadata private key
+    - Private key data structure: {id, metadata_key_id, user_id, data, created, modified}
+    - 'data' field contains metadata private key encrypted with user's public key
     
-    Returns metadata keys with their public keys for encryption. In zero-knowledge mode,
-    users can only access keys shared with them.
+    Why this structure:
+    - Shared metadata key enables multiple users to decrypt same metadata
+    - Individual encryption of private key maintains per-user security
+    - User must decrypt their copy to access the actual metadata private key
+    - Supports key rotation and per-user revocation
+    
+    Returns array of metadata key objects including encrypted private key data.
     """
     if debug:
         print("Getting shared metadata keys...")
@@ -539,6 +640,36 @@ def import_metadata_private_key(metadata_key, gpg_home, debug=False):
         if 'temp_key_file' in locals():
             os.unlink(temp_key_file.name)
 
+def parse_gpg_error(stderr_output):
+    """
+    Parse GPG stderr output to provide specific error messages.
+    
+    Common GPG errors and their meanings:
+    - "No such file or directory": Key file path invalid
+    - "Invalid key": Key format or corruption issue
+    - "public key decryption failed": Wrong passphrase or key mismatch
+    - "no valid OpenPGP data": Invalid PGP message format
+    - "Inappropriate ioctl for device": Passphrase prompt issue (should use --pinentry-mode loopback)
+    """
+    stderr = stderr_output.lower()
+    
+    if "no such file or directory" in stderr:
+        return "Key file not found or path invalid"
+    elif "public key decryption failed" in stderr:
+        return "Wrong passphrase or key mismatch"
+    elif "no valid openpgp data" in stderr:
+        return "Invalid PGP message format"
+    elif "inappropriate ioctl for device" in stderr:
+        return "GPG passphrase prompt issue (keyring isolation problem)"
+    elif "invalid key" in stderr:
+        return "Key format or corruption issue"
+    elif "key not found" in stderr:
+        return "Required key not found in keyring"
+    elif "expired" in stderr:
+        return "Key has expired"
+    else:
+        return f"GPG operation failed: {stderr_output[:200]}"
+
 def import_public_key(armored_key, gpg_home, debug=False):
     """
     Import a public key into the GPG keyring.
@@ -585,13 +716,20 @@ def import_public_key(armored_key, gpg_home, debug=False):
 
 def gpg_encrypt_and_sign_message(plaintext, recipient_fingerprint, signing_key_paths, passphrase, gpg_home, debug=False):
     """
-    Encrypt a message using GPG with the recipient's public key and sign with multiple private keys.
+    GPG encrypt message for recipient and sign with user's private key.
     
-    Matches the browser extension's behavior of encrypting with the metadata public key
-    and signing with both the user's private key and the metadata private key.
+    Technical implementation:
+    - Creates temporary input/output files within GPG home directory
+    - GPG command: --encrypt --sign --recipient {fingerprint} --default-key {signing_key}
+    - Uses --armor for ASCII output, --trust-model always to skip trust verification
+    - --batch --yes for non-interactive operation, --no-auto-key-locate for isolation
     
-    Recipient's public key and signing keys must be imported into GPG keyring first.
-    Uses armor format for ASCII output and trust model 'always' to avoid trust prompts.
+    For metadata encryption:
+    - recipient_fingerprint: metadata public key fingerprint
+    - signing_key_paths: [user_private_key_path] (only user signs, not metadata key)
+    - Output: ASCII-armored encrypted+signed message
+    
+    Requires recipient public key and signing private key already imported to gpg_home keyring.
     """
     if debug:
         print(f"Encrypting and signing message for recipient: {recipient_fingerprint}")
@@ -631,7 +769,7 @@ def gpg_encrypt_and_sign_message(plaintext, recipient_fingerprint, signing_key_p
         result = subprocess.run(cmd, capture_output=True, text=True, cwd=gpg_home)
         
         if result.returncode != 0:
-            raise Exception(f"GPG encryption failed: {result.stderr}")
+            raise Exception(f"GPG encryption failed: {parse_gpg_error(result.stderr)}")
         
         # Read encrypted output
         with open(temp_output.name, 'r') as f:
@@ -689,10 +827,20 @@ def gpg_encrypt_message(plaintext, recipient_fingerprint, gpg_home, debug=False)
 
 def gpg_decrypt_message(encrypted_message, passphrase, gpg_home=None, debug=False):
     """
-    Decrypt a PGP message using GPG and the given passphrase.
+    GPG decrypt PGP message using private key and passphrase.
     
-    Uses temporary files for input/output and supports both user keys and shared keys.
-    Returns decrypted plaintext.
+    Technical implementation:
+    - Creates temporary files for encrypted input and decrypted output
+    - GPG command: --batch --yes --pinentry-mode loopback --passphrase {passphrase} --decrypt
+    - Conditionally adds --homedir {gpg_home} if provided for keyring isolation
+    - Uses --pinentry-mode loopback to avoid GUI passphrase prompts
+    
+    Usage contexts:
+    - Decrypt metadata private keys (passphrase = user's passphrase)
+    - Decrypt resource metadata with metadata private key (passphrase = empty string)
+    - Decrypt resource secrets with user private key (passphrase = user's passphrase)
+    
+    Returns decrypted plaintext string with whitespace stripped.
     """
     if debug:
         print("Decrypting message...")
@@ -719,11 +867,27 @@ def gpg_decrypt_message(encrypted_message, passphrase, gpg_home=None, debug=Fals
 
 def decrypt_resource_metadata(resource, user_info, key_file, passphrase, gpg_home, jwt_token, passbolt_url, debug=False, verbose=False):
     """
-    Decrypt resource metadata based on encryption type (user_key or shared_key).
+    Decrypt resource metadata using appropriate key based on metadata_key_type.
     
-    This function handles the complex workflow of decrypting metadata for both
-    user_key and shared_key encryption types, including the shared key decryption
-    process that requires fetching and decrypting the shared metadata key.
+    Two encryption types:
+    1. user_key (v4 resources): metadata encrypted directly with user's public key
+       - GPG decrypt using user's private key and passphrase
+       - Direct decryption, no intermediate steps
+       
+    2. shared_key (v5 resources): metadata encrypted with shared metadata key
+       - GET /metadata/keys.json to retrieve shared metadata keys
+       - Find metadata key matching resource's metadata_key_id
+       - Extract user's encrypted private key from metadata_private_keys array
+       - GPG decrypt private key using user's private key and passphrase
+       - Parse decrypted JSON to extract actual metadata private key
+       - Import metadata private key to temporary GPG keyring
+       - GPG decrypt resource metadata using metadata private key (no passphrase)
+    
+    Why shared_key is complex:
+    - Metadata private key itself is encrypted per-user for security
+    - Each user has their own encrypted copy of the same metadata private key
+    - This enables shared metadata decryption while maintaining individual key security
+    - Metadata private key typically has no passphrase (empty string for GPG decrypt)
     """
     if verbose:
         print(f"Decrypting metadata for resource {resource.get('id', 'unknown')[:8]}...")
@@ -965,30 +1129,28 @@ def get_folder_permissions(folder_id, jwt_token, passbolt_url, debug=False):
 def create_v5_resource(folder_id, resource_name, username, password, uri, description, 
                       jwt_token, passbolt_url, user_info, gpg_home, debug=False):
     """
-    Create a resource with encrypted metadata using shared metadata keys.
+    Create v5 resource with encrypted metadata using shared metadata keys.
     
-    This function implements the browser extension's resource creation workflow:
-    1. Check folder permissions to determine sharing requirements
-    2. Get shared metadata keys that the user has access to
-    3. Import the metadata key's public key for encryption
-    4. Import the metadata key's private key for signing
-    5. Create metadata object with resource details (browser extension format)
-    6. Encrypt metadata using the shared metadata key's public key and sign with both keys
-    7. Encrypt password using user's public key
-    8. Submit resource payload with encrypted metadata (current user only)
-    9. If in shared folder, share with other folder users using correct approach
-    10. Verify the created resource
+    Technical implementation:
+    1. Folder analysis: if folder_id provided, retrieve folder permissions for post-creation sharing
+    2. Metadata key retrieval: GET /metadata/keys.json?contain[metadata_private_keys]=1
+    3. GPG keyring setup: import metadata public key and user public key to temporary keyring
+    4. Metadata construction: build JSON with object_type, name, username, uris[], description, resource_type_id, custom_fields[]
+    5. Metadata encryption: GPG encrypt with metadata public key + sign with user private key
+    6. Secret construction: JSON object {password: string, description: string}
+    7. Secret encryption: GPG encrypt secret JSON with user's public key
+    8. Resource creation: POST /resources.json with {resource_type_id, metadata, metadata_key_id, metadata_key_type: "shared_key", secrets: [{user_id, data}]}
+    9. Folder sharing: if folder_id exists, execute sharing workflow for folder users
+    10. Verification: confirm resource created and accessible via API
     
-    SHARED FOLDER WORKFLOW:
-    - Resources are created with only the current user's permission initially
-    - After creation, the resource is shared with other folder users by:
-      a) Getting the resource's secret (encrypted with metadata key)
-      b) Decrypting it using the metadata private key
-      c) Encrypting it for each user who needs access
-      d) Calling the share endpoint with both permissions and secrets
+    Why this approach:
+    - Metadata encrypted with shared key enables multiple users to decrypt metadata without re-encryption
+    - Secrets remain individually encrypted for security (each user has unique secret encryption)
+    - Initial creation with single user permission matches browser extension behavior
+    - Post-creation sharing ensures proper secret encryption for all folder users
+    - GPG signing provides authenticity verification for metadata
     
-    Metadata must be encrypted and signed with both user and metadata private keys.
-    Secrets are encrypted with individual user keys. folder_id is optional.
+    folder_id parameter optional - if None, creates personal resource.
     """
     if debug:
         print(f"Creating resource: {resource_name}")
@@ -1033,8 +1195,6 @@ def create_v5_resource(folder_id, resource_name, username, password, uri, descri
     # Import the shared metadata key's public key
     import_public_key(metadata_key_armored, gpg_home, debug)
     
-    # Import the shared metadata key's private key for signing
-    import_metadata_private_key(metadata_key, gpg_home, debug)
     
     # Get and import current user's public key for secret encryption
     user_public_key = get_user_public_key(user_info['user_id'], jwt_token, passbolt_url, debug)
@@ -1055,7 +1215,7 @@ def create_v5_resource(folder_id, resource_name, username, password, uri, descri
     metadata_json = json.dumps(metadata)
     # Use the metadata key's fingerprint for encryption with proper signing
     # This matches the browser extension behavior of encrypting with metadata public key
-    # and signing with both user private key and metadata private key
+    # and signing with user private key only
     signing_key_paths = [os.getenv('PRIVATE_KEY_PATH')]  # User's private key
     encrypted_metadata = gpg_encrypt_and_sign_message(
         metadata_json, 
@@ -1066,8 +1226,13 @@ def create_v5_resource(folder_id, resource_name, username, password, uri, descri
         debug
     )
     
-    # Encrypt password for the current user (who will be the owner)
-    encrypted_password = gpg_encrypt_message(password, user_info['gpg_fingerprint'], gpg_home, debug)
+    # Create secret object (password + description) and encrypt for the current user
+    secret_data = {
+        "password": password,
+        "description": description
+    }
+    secret_json = json.dumps(secret_data)
+    encrypted_secret = gpg_encrypt_message(secret_json, user_info['gpg_fingerprint'], gpg_home, debug)
     
     # Create resource payload
     resource_data = {
@@ -1077,16 +1242,8 @@ def create_v5_resource(folder_id, resource_name, username, password, uri, descri
         "metadata_key_type": "shared_key",  # Using shared metadata key
         "secrets": [{
             "user_id": user_info['user_id'],  # Current user (owner only)
-            "data": encrypted_password
+            "data": encrypted_secret
         }],
-        "permissions": [
-            {
-                "aro": "User",
-                "aro_foreign_key": user_info['user_id'],  # Current user as owner
-                "aco": "Resource",
-                "type": permission_types['OWNER']  # OWNER permission for current user
-            }
-        ],
     }
     
     # Note: Resource is created with only the current user's permission
@@ -1118,8 +1275,8 @@ def create_v5_resource(folder_id, resource_name, username, password, uri, descri
         print("Note: Resources created with correct metadata structure are visible in the web UI.")
         print("The key is using PASSBOLT_RESOURCE_METADATA object_type and proper encryption/signing.")
     
-    # Note: All folder permissions are now included in the initial resource creation
-    # No additional sharing step needed (matches browser extension behavior)
+    # Note: Resource is created with only the current user's permission
+    # Additional users will be added via the share endpoint (matches browser extension behavior)
     
     return resource_id
 
@@ -1197,8 +1354,8 @@ def share_resource_with_folder_users_correct(resource_id, folder_permissions, jw
     Share a resource with folder users using the correct browser extension approach.
     
     This function:
-    1. Gets the resource's secret (encrypted with metadata key)
-    2. Decrypts it using the metadata private key
+    1. Gets the resource's secret (encrypted with user's key)
+    2. Decrypts it using the user's private key
     3. Encrypts it for each user who needs access
     4. Calls the share endpoint with both permissions and secrets
     """
@@ -1220,13 +1377,13 @@ def share_resource_with_folder_users_correct(resource_id, folder_permissions, jw
             print("No secrets found for resource, skipping sharing")
         return
     
-    # Get the current user's secret (encrypted with metadata key)
+    # Get the current user's secret (encrypted with user's key)
     current_user_secret = secrets[0]['data']
     
     if debug:
-        print("Decrypting resource secret using metadata private key...")
+        print("Decrypting resource secret using user's private key...")
     
-    # Decrypt the secret using the metadata private key
+    # Decrypt the secret using the user's private key
     try:
         # Get the passphrase from environment
         passphrase = os.getenv('PASSPHRASE')
@@ -1498,7 +1655,7 @@ def get_resource_secret(resource_id, jwt_token, passbolt_url, debug=False):
     """
     
     # Get the resource details including secrets
-    resource_response = api_get(f"/resources/{resource_id}.json", jwt_token, passbolt_url, debug)
+    resource_response = api_get(f"/resources/{resource_id}.json?contain[secret]=1", jwt_token, passbolt_url, debug)
     resource = resource_response.get('body', {})
     
     if debug:
@@ -1523,7 +1680,7 @@ def get_resource_secret(resource_id, jwt_token, passbolt_url, debug=False):
     
     return user_secret
 
-def decrypt_secret(encrypted_secret, private_key_path, passphrase, debug=False):
+def decrypt_secret(encrypted_secret, private_key_path, passphrase, gpg_home, debug=False):
     """
     Decrypt a secret using the user's private key.
     
@@ -1547,7 +1704,7 @@ def decrypt_secret(encrypted_secret, private_key_path, passphrase, debug=False):
     try:
         # Decrypt using GPG
         cmd = [
-            "gpg", "--batch", "--yes", "--passphrase", passphrase,
+            "gpg", "--homedir", gpg_home, "--batch", "--yes", "--passphrase", passphrase,
             "--decrypt", "--output", decrypted_file_path, encrypted_file_path
         ]
         
@@ -1557,7 +1714,7 @@ def decrypt_secret(encrypted_secret, private_key_path, passphrase, debug=False):
         result = subprocess.run(cmd, capture_output=True, text=True)
         
         if result.returncode != 0:
-            raise Exception(f"GPG decryption failed: {result.stderr}")
+            raise Exception(f"GPG decryption failed: {parse_gpg_error(result.stderr)}")
         
         # Read the decrypted content
         with open(decrypted_file_path, 'r') as f:
@@ -1577,7 +1734,7 @@ def decrypt_secret(encrypted_secret, private_key_path, passphrase, debug=False):
         except:
             pass
 
-def encrypt_secret_for_user(plaintext_secret, user_id, jwt_token, passbolt_url, debug=False):
+def encrypt_secret_for_user(plaintext_secret, user_id, jwt_token, passbolt_url, gpg_home, debug=False):
     """
     Encrypt a secret for a specific user using their public key.
     
@@ -1622,7 +1779,7 @@ def encrypt_secret_for_user(plaintext_secret, user_id, jwt_token, passbolt_url, 
     
     try:
         # Import the user's public key
-        import_cmd = ["gpg", "--batch", "--yes", "--import", key_file_path]
+        import_cmd = ["gpg", "--homedir", gpg_home, "--batch", "--yes", "--import", key_file_path]
         import_result = subprocess.run(import_cmd, capture_output=True, text=True)
         
         if import_result.returncode != 0:
@@ -1638,7 +1795,7 @@ def encrypt_secret_for_user(plaintext_secret, user_id, jwt_token, passbolt_url, 
         
         # Encrypt the secret
         encrypt_cmd = [
-            "gpg", "--armor", "--batch", "--yes", "--trust-model", "always",
+            "gpg", "--homedir", gpg_home, "--armor", "--batch", "--yes", "--trust-model", "always",
             "--encrypt", "--recipient", fingerprint, "--output", encrypted_file_path, plaintext_file_path
         ]
         
@@ -1686,14 +1843,140 @@ def delete_resource(resource_id, jwt_token, passbolt_url, debug=False):
             print(f"Deletion failed: {e}")
         raise Exception(f"Failed to delete resource: {e}")
 
-def share_resource_with_user(resource_id, user_id, permission_type, jwt_token, passbolt_url, debug=False):
+def share_metadata_keys_with_user(user_id, jwt_token, passbolt_url, gpg_home, debug=False):
     """
-    Share a resource with another user.
+    Share metadata private keys with user to enable metadata decryption access.
     
-    Permission types:
-    - 1: Read
-    - 7: Read + Update
-    - 15: Read + Update + Delete
+    Technical process:
+    1. GET /metadata/keys.json?contain[metadata_private_keys]=1 to retrieve available keys
+    2. GET /users/{user_id}.json to retrieve target user's public key
+    3. Import target user's public key to temporary GPG keyring
+    4. For each metadata key with private key access:
+       a) Extract private key data (encrypted for current user)
+       b) GPG decrypt private key using current user's private key
+       c) GPG encrypt decrypted private key data for target user's public key
+       d) Build sharing object: {metadata_key_id, user_id, data}
+    5. POST array to /metadata/keys/privates.json
+    
+    Why this works:
+    - Current user has metadata private key encrypted for their public key
+    - Decrypting with current user's private key reveals the actual metadata private key
+    - Re-encrypting for target user's public key allows them to decrypt metadata
+    - API creates metadata_private_keys table entry for target user
+    - Target user can now decrypt resource metadata using their copy of the private key
+    
+    Requires admin role. Enables target user to see and decrypt shared v5 resources.
+    """
+    if debug:
+        print(f"Sharing metadata keys with user: {user_id}")
+    
+    # Get shared metadata keys
+    metadata_keys = get_shared_metadata_keys(jwt_token, passbolt_url, debug)
+    if not metadata_keys:
+        if debug:
+            print("No metadata keys available to share")
+        return
+    
+    # Get target user's public key
+    target_user_public_key = get_user_public_key(user_id, jwt_token, passbolt_url, debug)
+    import_user_public_key(target_user_public_key, gpg_home, debug)
+    target_fingerprint = get_key_fingerprint_from_armored_key(target_user_public_key, debug)
+    
+    sharing_data = []
+    
+    for metadata_key in metadata_keys:
+        metadata_key_id = metadata_key['id']
+        
+        if debug:
+            print(f"Processing metadata key: {metadata_key_id}")
+        
+        # Check if this key has private keys for the current user
+        if 'metadata_private_keys' not in metadata_key or not metadata_key['metadata_private_keys']:
+            if debug:
+                print(f"  No private keys available for key {metadata_key_id}")
+            continue
+            
+        # Get the private key data (encrypted for current user)
+        encrypted_private_key_data = metadata_key['metadata_private_keys'][0]['data']
+        
+        # Decrypt the metadata private key using current user's private key
+        passphrase = os.getenv('PASSPHRASE')
+        decrypted_private_key_data = gpg_decrypt_message(encrypted_private_key_data, passphrase, gpg_home, debug)
+        
+        if debug:
+            print(f"  Decrypted metadata private key for re-encryption")
+        
+        # Re-encrypt for the target user
+        re_encrypted_data = gpg_encrypt_message(decrypted_private_key_data, target_fingerprint, gpg_home, debug)
+        
+        if debug:
+            print(f"  Re-encrypted metadata private key for target user")
+        
+        # Add to sharing data
+        sharing_data.append({
+            "metadata_key_id": metadata_key_id,
+            "user_id": user_id,
+            "data": re_encrypted_data
+        })
+    
+    if not sharing_data:
+        if debug:
+            print("No metadata keys to share")
+        return
+    
+    if debug:
+        print(f"Sharing {len(sharing_data)} metadata keys...")
+    
+    # Send to API
+    try:
+        response = api_post("/metadata/keys/privates.json", sharing_data, jwt_token, passbolt_url, debug)
+        if debug:
+            print(f"Metadata key sharing response: {response}")
+        return True
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 400:
+            try:
+                error_data = e.response.json()
+                if "already in use" in str(error_data):
+                    if debug:
+                        print(f"Metadata key already shared with user")
+                    print(f"User already has access to the metadata keys")
+                    return True
+            except:
+                pass
+        elif e.response.status_code == 403:
+            raise Exception("Admin access required to share metadata keys. Current user must have admin role.")
+        elif e.response.status_code == 404:
+            raise Exception("Metadata key sharing endpoint not found. Server may not support this feature.")
+        if debug:
+            print(f"Metadata key sharing failed: {e}")
+        raise Exception(f"Failed to share metadata keys: {e}")
+    except Exception as e:
+        if debug:
+            print(f"Metadata key sharing failed: {e}")
+        raise Exception(f"Failed to share metadata keys: {e}")
+
+def share_resource_with_user(resource_id, user_id, permission_type, jwt_token, passbolt_url, gpg_home, debug=False):
+    """
+    Share resource with user by providing encrypted secrets for all users with access.
+    
+    Technical process:
+    1. GET /resources/{id}.json?contain[secret]=1 to retrieve current encrypted secret
+    2. GPG decrypt secret using current user's private key in temporary keyring
+    3. GET /users/{user_id}.json to retrieve target user's public key and fingerprint
+    4. Import target user's public key to temporary keyring
+    5. GPG encrypt decrypted secret for target user's public key
+    6. PUT /share/resource/{id}.json with permissions array and secrets array
+    
+    API requirement: secrets array must contain encrypted secret for ALL users with access.
+    This includes both current user's existing secret and new user's encrypted secret.
+    
+    Permission types (database values):
+    - 1: Read only access
+    - 7: Read + Update access  
+    - 15: Read + Update + Delete (Owner) access
+    
+    Works for both v4 and v5 resources - metadata encryption type doesn't affect secret sharing.
     """
     if debug:
         print(f"Sharing resource {resource_id} with user {user_id} (permission: {permission_type})")
@@ -1707,75 +1990,59 @@ def share_resource_with_user(resource_id, user_id, permission_type, jwt_token, p
             print(f"Resource type: {resource.get('resource_type_id')}")
             print(f"Metadata key type: {resource.get('metadata_key_type')}")
         
-        # Check if this is a resource with shared metadata keys
-        if resource.get('metadata_key_type') == 'shared_key':
-            if debug:
-                print("Resource uses shared metadata keys - sharing without secrets")
-            
-            # For resources with shared metadata keys, we only need to share permissions
-            share_data = {
-                "permissions": [{
-                    "aro": "User",
-                    "aro_foreign_key": user_id,
-                    "aco": "Resource",
-                    "aco_foreign_key": resource_id,
-                    "type": permission_type
-                }]
-            }
-        else:
-            # For resources with individual secrets, we need to handle secrets
-            if debug:
-                print("Resource uses individual secrets - handling secret encryption")
-            
-            # Get the current resource secret
-            current_secret = get_resource_secret(resource_id, jwt_token, passbolt_url, debug)
-            encrypted_secret_data = current_secret.get('data', '')
-            
-            if debug:
-                print("Got current resource secret")
-            
-            # Decrypt the secret using the current user's private key
-            private_key_path = os.getenv('PRIVATE_KEY_PATH')
-            passphrase = os.getenv('PASSPHRASE')
-            
-            if not private_key_path or not passphrase:
-                raise ValueError("PRIVATE_KEY_PATH and PASSPHRASE environment variables must be set for resource sharing")
-            
-            plaintext_secret = decrypt_secret(encrypted_secret_data, private_key_path, passphrase, debug)
-            
-            if debug:
-                print("Decrypted current secret")
-            
-            # Encrypt the secret for the target user
-            target_encrypted_secret = encrypt_secret_for_user(plaintext_secret, user_id, jwt_token, passbolt_url, debug)
-            
-            if debug:
-                print("Encrypted secret for target user")
-            
-            # Get current user ID for the existing secret
-            user_info = get_user_info(jwt_token, passbolt_url, debug)
-            current_user_id = user_info['user_id']
-            
-            # Prepare sharing data with secrets for all users who will have access
-            share_data = {
-                "permissions": [{
-                    "aro": "User",
-                    "aro_foreign_key": user_id,
-                    "aco": "Resource",
-                    "aco_foreign_key": resource_id,
-                    "type": permission_type
-                }],
-                "secrets": [
-                    {
-                        "user_id": current_user_id,
-                        "data": encrypted_secret_data
-                    },
-                    {
-                        "user_id": user_id,
-                        "data": target_encrypted_secret
-                    }
-                ]
-            }
+        # All resources require secrets for sharing, regardless of metadata_key_type
+        if debug:
+            print("Handling secret encryption for resource sharing")
+        
+        # Get the current resource secret
+        current_secret = get_resource_secret(resource_id, jwt_token, passbolt_url, debug)
+        encrypted_secret_data = current_secret.get('data', '')
+        
+        if debug:
+            print("Got current resource secret")
+        
+        # Decrypt the secret using the current user's private key
+        private_key_path = os.getenv('PRIVATE_KEY_PATH')
+        passphrase = os.getenv('PASSPHRASE')
+        
+        if not private_key_path or not passphrase:
+            raise ValueError("PRIVATE_KEY_PATH and PASSPHRASE environment variables must be set for resource sharing")
+        
+        plaintext_secret = decrypt_secret(encrypted_secret_data, private_key_path, passphrase, gpg_home, debug)
+        
+        if debug:
+            print("Decrypted current secret")
+        
+        # Encrypt the secret for the target user
+        target_encrypted_secret = encrypt_secret_for_user(plaintext_secret, user_id, jwt_token, passbolt_url, gpg_home, debug)
+        
+        if debug:
+            print("Encrypted secret for target user")
+        
+        # Get current user ID for the existing secret
+        user_info = get_user_info(jwt_token, passbolt_url, debug)
+        current_user_id = user_info['user_id']
+        
+        # Prepare sharing data with secrets for all users who will have access
+        share_data = {
+            "permissions": [{
+                "aro": "User",
+                "aro_foreign_key": user_id,
+                "aco": "Resource",
+                "aco_foreign_key": resource_id,
+                "type": permission_type
+            }],
+            "secrets": [
+                {
+                    "user_id": current_user_id,
+                    "data": encrypted_secret_data
+                },
+                {
+                    "user_id": user_id,
+                    "data": target_encrypted_secret
+                }
+            ]
+        }
     
     except Exception as e:
         if debug:
@@ -2296,6 +2563,9 @@ Examples:
   %(prog)s share --resource-id RESOURCE_ID --share-with "user@example.com" \\
     --permission-type 7
 
+  # Share metadata keys with a user (admin only)
+  %(prog)s share-metadata --share-with "user@example.com"
+
   # Decrypt and display all resources
   %(prog)s decrypt
 
@@ -2326,17 +2596,18 @@ Configuration:
     
     # Operation selection
     parser.add_argument('action', nargs='?',
-                       choices=['create', 'list', 'show', 'decrypt', 'monitor', 'folders', 'users', 'share', 'delete'],
-                       help='''Action to perform:
-  create  - Create a new resource with encrypted metadata
-  list    - List all accessible resources
-  show    - Show detailed information about a specific resource
-  share   - Share a resource with another user
-  decrypt - Decrypt and display all resources
-  monitor - Monitor password expiry dates
-  folders - List all folders
-  users   - List all users
-  delete  - Delete a resource''')
+                       choices=['create', 'list', 'show', 'decrypt', 'monitor', 'folders', 'users', 'share', 'delete', 'share-metadata'],
+           help='''Action to perform:
+           create        - Create a new resource with encrypted metadata
+           list          - List all accessible resources
+           show          - Show detailed information about a specific resource
+           share         - Share a resource with another user
+           share-metadata - Share metadata keys with a user (admin only)
+           decrypt       - Decrypt and display all resources
+           monitor       - Monitor password expiry dates
+           folders       - List all folders
+           users         - List all users
+           delete        - Delete a resource''')
     
     # Common arguments
     parser.add_argument('--user-id', 
@@ -2453,6 +2724,10 @@ Configuration:
         if not args.resource_id:
             print("Error: --resource-id is required for delete action")
             return 1
+    elif args.action == 'share-metadata':
+        if not args.share_with:
+            print("Error: --share-with is required for share-metadata action")
+            return 1
     elif args.action in ['list', 'folders', 'users']:
         missing_config = []
         if not user_id:
@@ -2530,7 +2805,7 @@ Configuration:
             # Share resource with user if specified
             if args.share_with:
                 share_user_id = find_user_by_email(args.share_with, jwt_token, passbolt_url, debug)
-                share_resource_with_user(resource_id, share_user_id, args.permission_type, jwt_token, passbolt_url, debug)
+                share_resource_with_user(resource_id, share_user_id, args.permission_type, jwt_token, passbolt_url, temp_gpg_home, debug)
                 print(f"Shared with: {args.share_with}")
             else:
                 print("Resource created for current user only (not shared)")
@@ -2559,7 +2834,7 @@ Configuration:
             share_user_id = find_user_by_email(args.share_with, jwt_token, passbolt_url, debug)
             
             # Share resource with user
-            share_resource_with_user(args.resource_id, share_user_id, args.permission_type, jwt_token, passbolt_url, debug)
+            share_resource_with_user(args.resource_id, share_user_id, args.permission_type, jwt_token, passbolt_url, temp_gpg_home, debug)
             
             print(f"Successfully shared resource {args.resource_id} with {args.share_with}")
             
@@ -2568,6 +2843,17 @@ Configuration:
             delete_resource(args.resource_id, jwt_token, passbolt_url, debug)
             
             print(f"Successfully deleted resource {args.resource_id}")
+            
+        elif args.action == 'share-metadata':
+            # Share metadata keys with user
+            if not args.share_with:
+                print("Error: --share-with is required for share-metadata action")
+                return 1
+                
+            share_user_id = find_user_by_email(args.share_with, jwt_token, passbolt_url, debug)
+            share_metadata_keys_with_user(share_user_id, jwt_token, passbolt_url, temp_gpg_home, debug)
+            
+            print(f"Successfully shared metadata keys with {args.share_with}")
         
         return 0
         

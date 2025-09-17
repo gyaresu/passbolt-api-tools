@@ -81,7 +81,7 @@ The script implements the same approach as the Passbolt browser extension for cr
 
 1. **Create Resource**: Creates the resource with only the current user's permission initially
 2. **Get Folder Permissions**: Retrieves all users who have access to the folder
-3. **Decrypt Secret**: Decrypts the resource's secret using the metadata private key
+3. **Decrypt Secret**: Decrypts the resource's secret using the user's private key
 4. **Encrypt for Users**: Encrypts the secret for each user who needs access
 5. **Share Resource**: Calls the share endpoint with both permissions and encrypted secrets
 
@@ -104,8 +104,8 @@ This ensures resources created in shared folders are visible to all intended use
 #### Technical Actions
 
 - **Authentication**: GPG challenge/response with JWT token generation
-- **Metadata Encryption**: Uses shared metadata keys with multi-key signing
-- **Secret Management**: Handles both individual user secrets and shared metadata keys
+- **Metadata Encryption**: Uses shared metadata keys with user key signing
+- **Secret Management**: Handles individual user secrets (JSON objects with password + description)
 - **API Integration**: Passbolt API v2 compatibility
 - **Error Handling**: Validation and error messages
 

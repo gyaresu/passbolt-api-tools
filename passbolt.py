@@ -91,16 +91,14 @@ from dotenv import load_dotenv
 warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 
 DEFAULT_PASSBOLT_URL = os.getenv('PASSBOLT_URL', 'https://passbolt.local')
-DEFAULT_API_VERSION = os.getenv('PASSBOLT_API_VERSION', 'v2')
 DEFAULT_CHALLENGE_EXPIRY = int(os.getenv('PASSBOLT_CHALLENGE_EXPIRY', '300'))  # 5 minutes default
 DEFAULT_GPG_HOME_PREFIX = os.getenv('PASSBOLT_GPG_HOME_PREFIX', 'passbolt_gpg_')
 
 def api_get(path, jwt_token=None, passbolt_url=None, debug=False, params=None):
     """
-    Execute GET request to Passbolt API with automatic v2 versioning.
+    Execute GET request to Passbolt API.
     
     Technical details:
-    - Automatically appends ?api-version=v2 if not present in path
     - Uses Bearer token authentication in Authorization header
     - Accepts application/json content type
     - Raises HTTPError on non-200 status codes
@@ -111,14 +109,14 @@ def api_get(path, jwt_token=None, passbolt_url=None, debug=False, params=None):
     if passbolt_url is None:
         passbolt_url = DEFAULT_PASSBOLT_URL
     
-    # Handle existing query parameters when adding api-version
-    separator = "&" if "?" in path else "?"
-    url = f"{passbolt_url}{path}{separator}api-version={DEFAULT_API_VERSION}"
+    url = f"{passbolt_url}{path}"
     
     # Add additional parameters if provided
     if params:
+        separator = "&" if "?" in path else "?"
         for key, value in params.items():
-            url += f"&{key}={value}"
+            url += f"{separator}{key}={value}"
+            separator = "&"
     
     headers = {"Authorization": f"Bearer {jwt_token}"} if jwt_token else {}
     
@@ -165,14 +163,12 @@ def api_post(path, data, jwt_token=None, passbolt_url=None, debug=False):
     """
     Make authenticated POST request to Passbolt API.
     
-    Automatically appends ?api-version={DEFAULT_API_VERSION} and includes JWT token and Content-Type headers.
+    Includes JWT token and Content-Type headers.
     """
     if passbolt_url is None:
         passbolt_url = DEFAULT_PASSBOLT_URL
     
-    # Handle existing query parameters when adding api-version
-    separator = "&" if "?" in path else "?"
-    url = f"{passbolt_url}{path}{separator}api-version={DEFAULT_API_VERSION}"
+    url = f"{passbolt_url}{path}"
     headers = {"Authorization": f"Bearer {jwt_token}", "Content-Type": "application/json"} if jwt_token else {"Content-Type": "application/json"}
     
     if debug:
@@ -213,14 +209,12 @@ def api_put(path, data, jwt_token=None, passbolt_url=None, debug=False):
     """
     Make authenticated PUT request to Passbolt API.
     
-    Automatically appends ?api-version={DEFAULT_API_VERSION} and includes JWT token and Content-Type headers.
+    Includes JWT token and Content-Type headers.
     """
     if passbolt_url is None:
         passbolt_url = DEFAULT_PASSBOLT_URL
     
-    # Handle existing query parameters when adding api-version
-    separator = "&" if "?" in path else "?"
-    url = f"{passbolt_url}{path}{separator}api-version={DEFAULT_API_VERSION}"
+    url = f"{passbolt_url}{path}"
     headers = {"Authorization": f"Bearer {jwt_token}", "Content-Type": "application/json"} if jwt_token else {"Content-Type": "application/json"}
     
     if debug:
@@ -261,14 +255,12 @@ def api_delete(path, jwt_token=None, passbolt_url=None, debug=False):
     """
     Make authenticated DELETE request to Passbolt API.
     
-    Automatically appends ?api-version={DEFAULT_API_VERSION} and includes JWT token headers.
+    Includes JWT token headers.
     """
     if passbolt_url is None:
         passbolt_url = DEFAULT_PASSBOLT_URL
     
-    # Handle existing query parameters when adding api-version
-    separator = "&" if "?" in path else "?"
-    url = f"{passbolt_url}{path}{separator}api-version={DEFAULT_API_VERSION}"
+    url = f"{passbolt_url}{path}"
     headers = {"Authorization": f"Bearer {jwt_token}"} if jwt_token else {}
     
     if debug:

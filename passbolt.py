@@ -94,7 +94,7 @@ DEFAULT_PASSBOLT_URL = os.getenv('PASSBOLT_URL', 'https://passbolt.local')
 DEFAULT_CHALLENGE_EXPIRY = int(os.getenv('PASSBOLT_CHALLENGE_EXPIRY', '300'))  # 5 minutes default
 DEFAULT_GPG_HOME_PREFIX = os.getenv('PASSBOLT_GPG_HOME_PREFIX', 'passbolt_gpg_')
 
-def api_get(path, jwt_token=None, passbolt_url=None, debug=False, params=None):
+def api_get(path, jwt_token=None, passbolt_url=None, debug=False, params=None, totp_secret=None):
     """
     Execute GET request to Passbolt API.
     
@@ -148,6 +148,24 @@ def api_get(path, jwt_token=None, passbolt_url=None, debug=False, params=None):
         resp.raise_for_status()
         return resp.json()
     except requests.exceptions.HTTPError as e:
+        # Check for MFA requirement
+        if e.response.status_code == 403:
+            try:
+                error_data = e.response.json()
+                if 'body' in error_data and 'mfa_providers' in error_data['body']:
+                    if debug:
+                        print("MFA authentication required for API call")
+                    # Handle MFA for API calls
+                    if totp_secret:
+                        totp_code = get_totp_code(totp_secret, debug)
+                        # For now, we'll need to re-authenticate with MFA
+                        # This is a limitation - we'd need to store the MFA token
+                        raise Exception("MFA required - please re-run with --totp-secret or provide TOTP code manually")
+                    else:
+                        raise Exception("MFA authentication required - please provide TOTP code or use --totp-secret")
+            except:
+                pass
+        
         error_msg = f"API Error ({e.response.status_code})"
         try:
             error_data = e.response.json()
@@ -158,6 +176,25 @@ def api_get(path, jwt_token=None, passbolt_url=None, debug=False, params=None):
         except:
             error_msg += f": {e.response.text[:200]}"
         raise requests.exceptions.HTTPError(error_msg, response=e.response)
+
+def get_totp_code(totp_secret, debug=False):
+    """Get TOTP code from secret or user input."""
+    if totp_secret:
+        try:
+            import pyotp
+            totp = pyotp.TOTP(totp_secret)
+            totp_code = totp.now()
+            if debug:
+                print(f"Generated TOTP code: {totp_code}")
+            return totp_code
+        except ImportError:
+            print("pyotp not available, falling back to manual input")
+            return input("Enter your TOTP code: ")
+        except Exception as e:
+            print(f"TOTP generation failed: {e}")
+            return input("Enter your TOTP code: ")
+    else:
+        return input("Enter your TOTP code: ")
 
 def api_post(path, data, jwt_token=None, passbolt_url=None, debug=False):
     """
@@ -288,7 +325,7 @@ def api_delete(path, jwt_token=None, passbolt_url=None, debug=False):
     except:
         return {"status": "deleted"}
 
-def authenticate_with_passbolt(user_id, key_file, passphrase, passbolt_url, gpg_home, debug=False, verbose=False):
+def authenticate_with_passbolt(user_id, key_file, passphrase, passbolt_url, gpg_home, debug=False, verbose=False, totp_secret=None):
     """
     Authenticate with Passbolt using GPG challenge/response to obtain JWT token.
     
@@ -401,7 +438,11 @@ def authenticate_with_passbolt(user_id, key_file, passphrase, passbolt_url, gpg_
     
     login_body = {'user_id': user_id, 'challenge': encrypted_challenge}
     headers = {'Accept': 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': csrf_token}
-    resp = session.post(f"{passbolt_url}/auth/jwt/login.json", headers=headers, json=login_body, verify=False)
+    login_url = f"{passbolt_url}/auth/jwt/login.json"
+    if debug:
+        print(f"JWT login URL: {login_url}")
+    
+    resp = session.post(login_url, headers=headers, json=login_body, verify=False)
     resp.raise_for_status()
     data = resp.json()
     encrypted_response = data['body']['challenge']
@@ -423,7 +464,211 @@ def authenticate_with_passbolt(user_id, key_file, passphrase, passbolt_url, gpg_
     os.unlink(enc_resp_path)
     os.unlink(dec_resp_path)
     
-    return decrypted['access_token']
+    # Check if MFA is required
+    if 'providers' in decrypted:
+        if debug:
+            print("MFA providers received, MFA verification required")
+        return handle_mfa_verification(decrypted, passbolt_url, session, debug, totp_secret)
+    
+    # If we have an access_token, return it
+    if 'access_token' in decrypted:
+        return decrypted['access_token']
+    
+    # If we have a verify_token, we need to complete the JWT flow
+    if 'verify_token' in decrypted:
+        if debug:
+            print("Verify token received, completing JWT authentication...")
+        return complete_jwt_authentication(decrypted['verify_token'], passbolt_url, session, debug)
+    
+    raise Exception("No valid authentication token received")
+
+def complete_jwt_authentication(verify_token, passbolt_url, session, debug=False):
+    """
+    Complete JWT authentication by exchanging verify token for access token.
+    
+    Args:
+        verify_token: Verify token from initial authentication
+        passbolt_url: Passbolt server URL
+        session: Active requests session
+        debug: Enable debug output
+    
+    Returns:
+        str: JWT access token
+    """
+    if debug:
+        print("Completing JWT authentication...")
+    
+    # Exchange verify token for access token
+    jwt_data = {
+        'verify_token': verify_token
+    }
+    
+    headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
+    # Try with the correct base URL
+    jwt_url = f"{passbolt_url}/auth/jwt/refresh.json"
+    if debug:
+        print(f"JWT refresh URL: {jwt_url}")
+    
+    resp = session.post(jwt_url, headers=headers, json=jwt_data, verify=False)
+    
+    if resp.status_code == 200:
+        data = resp.json()
+        if debug:
+            print("JWT authentication completed successfully")
+        return data['body']['access_token']
+    else:
+        error_data = resp.json() if resp.headers.get('content-type', '').startswith('application/json') else {}
+        error_msg = error_data.get('header', {}).get('message', 'JWT authentication failed')
+        raise Exception(f"JWT authentication failed: {error_msg}")
+
+def handle_mfa_verification(challenge_data, passbolt_url, session, debug=False, totp_secret=None):
+    """
+    Handle MFA verification for TOTP authentication.
+    
+    Args:
+        challenge_data: Challenge data containing providers and verify_token
+        passbolt_url: Passbolt server URL
+        session: Active requests session
+        debug: Enable debug output
+        totp_secret: TOTP secret for automatic code generation (optional)
+    
+    Returns:
+        str: JWT access token after successful MFA verification
+    """
+    if debug:
+        print("MFA verification required")
+        print(f"Available providers: {challenge_data.get('providers', [])}")
+    
+    # Get TOTP code
+    if totp_secret:
+        # Automatic TOTP code generation using oathtool
+        try:
+            import subprocess
+            result = subprocess.run(['oathtool', '--totp', '-b', totp_secret], 
+                                  capture_output=True, text=True, check=True)
+            totp_code = result.stdout.strip()
+            if debug:
+                print(f"Generated TOTP code using oathtool: {totp_code}")
+        except subprocess.CalledProcessError as e:
+            print(f"oathtool failed: {e}")
+            totp_code = input("Enter your TOTP code: ")
+        except FileNotFoundError:
+            print("oathtool not found, falling back to manual input")
+            totp_code = input("Enter your TOTP code: ")
+        except Exception as e:
+            print(f"TOTP generation failed: {e}")
+            totp_code = input("Enter your TOTP code: ")
+    else:
+        # Manual TOTP code input
+        totp_code = input("Enter your TOTP code: ")
+    
+    # First, try to get CSRF token from the main page
+    if debug:
+        print("Attempting to get CSRF token from main page...")
+    
+    csrf_resp = session.get(f"{passbolt_url}/", verify=False)
+    csrf_token = None
+    
+    if debug:
+        print(f"Main page response status: {csrf_resp.status_code}")
+        print(f"Main page response headers: {dict(csrf_resp.headers)}")
+    
+    # Try to extract CSRF token from HTML response
+    import re
+    csrf_match = re.search(r'name="csrfToken"\s+value="([^"]+)"', csrf_resp.text)
+    if csrf_match:
+        csrf_token = csrf_match.group(1)
+        if debug:
+            print(f"Found CSRF token in HTML: {csrf_token[:10]}...")
+    
+    # Try to extract CSRF token from cookies
+    csrf_cookie = None
+    for cookie in session.cookies:
+        if 'csrf' in cookie.name.lower():
+            csrf_cookie = cookie.value
+            if debug:
+                print(f"Found CSRF cookie: {cookie.name}={csrf_cookie[:10]}...")
+            break
+    
+    # Submit MFA verification
+    mfa_data = {
+        'totp': totp_code,
+        'verify_token': challenge_data.get('verify_token')
+    }
+    
+    headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
+    
+    # Try with CSRF token if found
+    if csrf_token:
+        headers['X-CSRF-Token'] = csrf_token
+        if debug:
+            print(f"Using CSRF token from HTML: {csrf_token[:10]}...")
+    elif csrf_cookie:
+        headers['X-CSRF-Token'] = csrf_cookie
+        if debug:
+            print(f"Using CSRF cookie: {csrf_cookie[:10]}...")
+    
+    # Also try to use the verify_token as a Bearer token
+    if challenge_data.get('verify_token'):
+        headers['Authorization'] = f"Bearer {challenge_data.get('verify_token')}"
+        if debug:
+            print(f"Using verify_token as Bearer: {challenge_data.get('verify_token')[:10]}...")
+    
+    # Check if we have a session cookie
+    session_cookie = None
+    for cookie in session.cookies:
+        if 'session' in cookie.name.lower():
+            session_cookie = cookie.value
+            if debug:
+                print(f"Found session cookie: {cookie.name}={session_cookie[:10]}...")
+            break
+    
+    # Add session cookie to the request
+    if session_cookie:
+        headers['Cookie'] = f"passbolt_session={session_cookie}"
+        if debug:
+            print(f"Using session cookie: {session_cookie[:10]}...")
+    
+    # First, try to authenticate with the session by making a request to a protected endpoint
+    if session_cookie:
+        if debug:
+            print("Testing session authentication...")
+        test_resp = session.get(f"{passbolt_url}/users/me.json", headers={'Cookie': f"passbolt_session={session_cookie}"}, verify=False)
+        if debug:
+            print(f"Session test response status: {test_resp.status_code}")
+            if test_resp.status_code != 200:
+                print(f"Session test error: {test_resp.text[:200]}...")
+    
+    if debug:
+        print(f"Final headers: {headers}")
+        print(f"Final data: {mfa_data}")
+    
+    # Try the MFA verification
+    mfa_url = f"{passbolt_url}/mfa/verify/totp.json"
+    if debug:
+        print(f"MFA verification URL: {mfa_url}")
+    
+    resp = session.post(mfa_url, headers=headers, json=mfa_data, verify=False)
+    
+    if debug:
+        print(f"MFA verification response status: {resp.status_code}")
+        print(f"MFA verification response headers: {dict(resp.headers)}")
+        if resp.status_code != 200:
+            try:
+                error_data = resp.json()
+                print(f"MFA verification error response: {error_data}")
+            except:
+                print(f"MFA verification error text: {resp.text[:200]}...")
+    
+    if resp.status_code == 200:
+        data = resp.json()
+        if debug:
+            print("MFA verification successful")
+        return data['body']['access_token']
+    else:
+        error_data = resp.json() if resp.headers.get('content-type', '').startswith('application/json') else {}
+        error_msg = error_data.get('header', {}).get('message', 'MFA verification failed')
+        raise Exception(f"MFA verification failed: {error_msg}")
 
 def get_resource_types(jwt_token, passbolt_url, debug=False):
     """
@@ -850,7 +1095,21 @@ def gpg_decrypt_message(encrypted_message, passphrase, gpg_home=None, debug=Fals
         gpg_cmd.insert(2, gpg_home)
     result = subprocess.run(gpg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if not os.path.exists(dec_file) or os.path.getsize(dec_file) == 0:
-        raise Exception(f"GPG decryption failed: {result.stderr}")
+        # Enhanced error detection for better user experience
+        stderr = result.stderr.lower()
+        if "no secret key" in stderr:
+            if "ecdh" in stderr:
+                raise Exception(f"Shared metadata key not accessible: Key may not be shared with this user")
+            else:
+                raise Exception(f"Metadata key access denied: No private key available for decryption")
+        elif "bad passphrase" in stderr:
+            raise Exception(f"Invalid passphrase: Check your GPG key passphrase")
+        elif "no data" in stderr:
+            raise Exception(f"Invalid encrypted data: Message may be corrupted")
+        elif "gpg: decryption failed" in stderr:
+            raise Exception(f"Decryption failed: {result.stderr}")
+        else:
+            raise Exception(f"GPG decryption failed: {result.stderr}")
     with open(dec_file, "r") as f:
         decrypted = f.read()
     os.unlink(enc_file)
@@ -1835,6 +2094,108 @@ def delete_resource(resource_id, jwt_token, passbolt_url, debug=False):
             print(f"Deletion failed: {e}")
         raise Exception(f"Failed to delete resource: {e}")
 
+def diagnose_metadata_access(jwt_token, passbolt_url, debug=False, totp_secret=None):
+    """
+    Diagnose metadata key access issues for the current user.
+    
+    Returns:
+        dict: Diagnostic information about metadata key access
+    """
+    if debug:
+        print("Diagnosing metadata key access...")
+    
+    try:
+        # Get user info with missing metadata key IDs
+        user_response = api_get("/users/me.json?contain[missing_metadata_key_ids]=1", jwt_token, passbolt_url, debug, totp_secret=totp_secret)
+        user_info = user_response.get('body', {})
+        
+        # Get available metadata keys
+        metadata_keys = get_shared_metadata_keys(jwt_token, passbolt_url, debug)
+        
+        # Get resources to check access
+        resources_response = api_get("/resources.json", jwt_token, passbolt_url, debug)
+        resources = resources_response.get('body', [])
+        
+        # Analyze access
+        missing_keys = user_info.get('missing_metadata_key_ids', [])
+        accessible_keys = [key['id'] for key in metadata_keys]
+        
+        # Check resource access
+        v5_resources = [r for r in resources if r.get('metadata_key_type') == 'shared_key']
+        inaccessible_resources = []
+        
+        for resource in v5_resources:
+            metadata_key_id = resource.get('metadata_key_id')
+            if metadata_key_id not in accessible_keys:
+                inaccessible_resources.append({
+                    'id': resource['id'],
+                    'metadata_key_id': metadata_key_id,
+                    'name': resource.get('name', 'Unknown')
+                })
+        
+        return {
+            'user_id': user_info.get('id'),
+            'username': user_info.get('username'),
+            'missing_metadata_keys': missing_keys,
+            'accessible_metadata_keys': accessible_keys,
+            'total_metadata_keys': len(metadata_keys),
+            'total_v5_resources': len(v5_resources),
+            'inaccessible_resources': inaccessible_resources,
+            'access_percentage': len(accessible_keys) / len(metadata_keys) * 100 if metadata_keys else 0
+        }
+        
+    except Exception as e:
+        if debug:
+            print(f"Diagnosis failed: {e}")
+        return {'error': str(e)}
+
+def validate_metadata_key(metadata_key, expected_fingerprint=None):
+    """
+    Validate metadata key integrity and fingerprint.
+    
+    Args:
+        metadata_key: Metadata key object from API
+        expected_fingerprint: Expected fingerprint for validation (optional)
+    
+    Raises:
+        Exception: If key validation fails
+    """
+    if not metadata_key.get('fingerprint'):
+        raise Exception("Metadata key missing fingerprint")
+    
+    if expected_fingerprint and metadata_key['fingerprint'] != expected_fingerprint:
+        raise Exception(f"Metadata key fingerprint mismatch: expected {expected_fingerprint}, got {metadata_key['fingerprint']}")
+    
+    # Validate armored key format
+    armored_key = metadata_key.get('armored_key', '')
+    if not armored_key.startswith('-----BEGIN PGP PUBLIC KEY BLOCK-----'):
+        raise Exception("Invalid metadata key format")
+    
+    return True
+
+def list_metadata_keys(jwt_token, passbolt_url, debug=False):
+    """
+    List all metadata keys and their access status for the current user.
+    """
+    try:
+        metadata_keys = get_shared_metadata_keys(jwt_token, passbolt_url, debug)
+        
+        print("Available Metadata Keys:")
+        print("=" * 50)
+        
+        for key in metadata_keys:
+            print(f"Key ID: {key['id']}")
+            print(f"Fingerprint: {key['fingerprint']}")
+            print(f"Created: {key.get('created', 'Unknown')}")
+            print(f"Has Private Key: {'metadata_private_keys' in key and key['metadata_private_keys']}")
+            if 'metadata_private_keys' in key and key['metadata_private_keys']:
+                pk = key['metadata_private_keys'][0]
+                print(f"Private Key User ID: {pk.get('user_id', 'Unknown')}")
+            print("-" * 30)
+            
+    except Exception as e:
+        print(f"Failed to list metadata keys: {e}")
+
 def share_metadata_keys_with_user(user_id, jwt_token, passbolt_url, gpg_home, debug=False):
     """
     Share metadata private keys with user to enable metadata decryption access.
@@ -2588,7 +2949,7 @@ Configuration:
     
     # Operation selection
     parser.add_argument('action', nargs='?',
-                       choices=['create', 'list', 'show', 'decrypt', 'monitor', 'folders', 'users', 'share', 'delete', 'share-metadata'],
+                       choices=['create', 'list', 'show', 'decrypt', 'monitor', 'folders', 'users', 'share', 'delete', 'share-metadata', 'diagnose', 'list-keys'],
            help='''Action to perform:
            create        - Create a new resource with encrypted metadata
            list          - List all accessible resources
@@ -2599,7 +2960,9 @@ Configuration:
            monitor       - Monitor password expiry dates
            folders       - List all folders
            users         - List all users
-           delete        - Delete a resource''')
+           delete        - Delete a resource
+           diagnose      - Diagnose metadata key access issues
+           list-keys     - List available metadata keys and access status''')
     
     # Common arguments
     parser.add_argument('--user-id', 
@@ -2610,6 +2973,8 @@ Configuration:
                        help='Path to GPG private key file (overrides .env KEY_FILE)')
     parser.add_argument('--passphrase', 
                        help='GPG key passphrase (overrides .env PASSPHRASE)')
+    parser.add_argument('--totp-secret', 
+                       help='TOTP secret for automatic MFA code generation (overrides .env TOTP_SECRET)')
     parser.add_argument('-v', '--verbose', action='store_true', 
                        help='Show detailed educational explanations of the process')
     parser.add_argument('--debug', action='store_true', 
@@ -2661,6 +3026,7 @@ Configuration:
     passbolt_url = args.url or os.getenv('URL', DEFAULT_PASSBOLT_URL)
     key_file = args.key_file or os.getenv('KEY_FILE')
     passphrase = args.passphrase or os.getenv('PASSPHRASE')
+    totp_secret = args.totp_secret or os.getenv('TOTP_SECRET')
     
     debug = args.debug or args.verbose
     
@@ -2763,7 +3129,7 @@ Configuration:
             print(f"Using temporary GPG home: {temp_gpg_home}")
         
         # Authenticate with Passbolt
-        jwt_token = authenticate_with_passbolt(user_id, key_file, passphrase, passbolt_url, temp_gpg_home, debug, args.verbose)
+        jwt_token = authenticate_with_passbolt(user_id, key_file, passphrase, passbolt_url, temp_gpg_home, debug, args.verbose, totp_secret)
         
         # Get user information
         user_info = get_user_info(jwt_token, passbolt_url, debug)
@@ -2846,6 +3212,35 @@ Configuration:
             share_metadata_keys_with_user(share_user_id, jwt_token, passbolt_url, temp_gpg_home, debug)
             
             print(f"Successfully shared metadata keys with {args.share_with}")
+            
+        elif args.action == 'diagnose':
+            # Diagnose metadata key access issues
+            diagnostic_info = diagnose_metadata_access(jwt_token, passbolt_url, debug, totp_secret)
+            print("\nMetadata Key Access Diagnosis:")
+            print("=" * 40)
+            print(f"User: {diagnostic_info.get('username', 'Unknown')}")
+            print(f"User ID: {diagnostic_info.get('user_id', 'Unknown')}")
+            print(f"Accessible Keys: {len(diagnostic_info.get('accessible_metadata_keys', []))}")
+            print(f"Missing Keys: {len(diagnostic_info.get('missing_metadata_keys', []))}")
+            print(f"Total Metadata Keys: {diagnostic_info.get('total_metadata_keys', 0)}")
+            print(f"V5 Resources: {diagnostic_info.get('total_v5_resources', 0)}")
+            print(f"Access Percentage: {diagnostic_info.get('access_percentage', 0):.1f}%")
+            
+            if diagnostic_info.get('inaccessible_resources'):
+                print(f"\nInaccessible Resources ({len(diagnostic_info['inaccessible_resources'])}):")
+                for resource in diagnostic_info['inaccessible_resources'][:5]:  # Show first 5
+                    print(f"  - {resource['name']} (ID: {resource['id'][:8]}, Key: {resource['metadata_key_id'][:8]})")
+                if len(diagnostic_info['inaccessible_resources']) > 5:
+                    print(f"  ... and {len(diagnostic_info['inaccessible_resources']) - 5} more")
+            
+            if diagnostic_info.get('missing_metadata_keys'):
+                print(f"\nMissing Metadata Keys:")
+                for key_id in diagnostic_info['missing_metadata_keys']:
+                    print(f"  - {key_id}")
+                    
+        elif args.action == 'list-keys':
+            # List available metadata keys
+            list_metadata_keys(jwt_token, passbolt_url, debug)
         
         return 0
         

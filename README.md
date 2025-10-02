@@ -133,6 +133,51 @@ Example of Passbolt JWT authentication using GPG challenge/response.
 python3 jwt_auth_minimum_example.py
 ```
 
+### 2. passbolt_pgpy_example.py - Pure Python OpenPGP Implementation
+
+Demonstrates Passbolt API interaction using PGPy (pure Python OpenPGP library) instead of system GPG binary.
+
+#### Features
+
+- **Pure Python**: No system GPG binary required
+- **Session Key Caching**: Performance optimization for repeated decryptions
+- **Authentication**: JWT authentication using PGPy
+- **Metadata Decryption**: Decrypt metadata private keys and resource metadata
+- **Compatibility**: Works in environments where GPG binary is unavailable
+
+#### Usage
+
+```bash
+# Install PGPy dependencies
+pip install -r requirements-pgpy.txt
+
+# Run the example
+python3 passbolt_pgpy_example.py
+```
+
+#### Requirements
+
+- `pgpy` - Pure Python OpenPGP implementation
+- `standard-imghdr` - Python 3.13 compatibility for PGPy
+- `requests` - HTTP client for API calls
+- `python-dotenv` - Environment variable management
+
+#### Session Key Caching
+
+The script includes session key caching implementation for performance optimization:
+
+- **Implementation**: Complete session key caching framework
+- **Cache Persistence**: JSON-based cache storage
+- **Limitation**: May not work with Passbolt metadata keys due to SHA3-224 compatibility issues
+
+#### Compatibility Notes
+
+- **Authentication**: Works with all Passbolt instances
+- **Metadata Keys**: Limited by PGPy's hash algorithm support
+  - PGPy supports: MD5(1), SHA1(2), RIPEMD160(3), SHA256(8), SHA384(9), SHA512(10), SHA224(11)
+  - PGPy does NOT support: SHA3-224(14) used by some Passbolt metadata keys
+- **Session Key Caching**: Implementation complete but limited by PGPy compatibility
+
 ### 3. group_update.py - Group Management
 
 Script for creating groups and managing user permissions in Passbolt.

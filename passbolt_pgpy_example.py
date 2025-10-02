@@ -9,8 +9,13 @@ a pure Python OpenPGP implementation, instead of relying on system GPG binary.
 This addresses the requirement to work in environments where GPG binary
 availability cannot be guaranteed.
 
+IMPORTANT COMPATIBILITY NOTE:
+Passbolt metadata keys may use SHA3-224 (hash algorithm 14), which PGPy does not support.
+PGPy only supports: MD5(1), SHA1(2), RIPEMD160(3), SHA256(8), SHA384(9), SHA512(10), SHA224(11)
+PGPy does NOT support SHA3-224(14) - this may cause metadata key loading to fail.
+
 Requirements:
-    pip install pgpy requests python-dotenv
+    pip install pgpy standard-imghdr requests python-dotenv
 
 Author: Gareth (for Paul's evaluation)
 """

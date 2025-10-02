@@ -1,23 +1,26 @@
 #!/usr/bin/env python3
 """
-Passbolt PGPy Integration Example
-==================================
+Passbolt PGPy Integration Example - LEARNING PURPOSES ONLY
+==========================================================
+
+WARNING: This script is for educational/learning purposes only.
+DO NOT USE IN PRODUCTION.
 
 This script demonstrates how to interact with Passbolt API using PGPy,
 a pure Python OpenPGP implementation, instead of relying on system GPG binary.
 
-This addresses the requirement to work in environments where GPG binary
-availability cannot be guaranteed.
-
-IMPORTANT COMPATIBILITY NOTE:
-Passbolt metadata keys may use SHA3-224 (hash algorithm 14), which PGPy does not support.
-PGPy only supports: MD5(1), SHA1(2), RIPEMD160(3), SHA256(8), SHA384(9), SHA512(10), SHA224(11)
-PGPy does NOT support SHA3-224(14) - this may cause metadata key loading to fail.
+CRITICAL LIMITATIONS:
+- Passbolt metadata keys use SHA3-224 (hash algorithm 14), which PGPy does not support
+- PGPy only supports: MD5(1), SHA1(2), RIPEMD160(3), SHA256(8), SHA384(9), SHA512(10), SHA224(11)
+- PGPy does NOT support SHA3-224(14) - metadata key operations will fail
+- Session key caching implementation is incomplete and non-functional with Passbolt
+- PGPy is not suitable for production use with Passbolt due to compatibility issues
+- This is a proof-of-concept only, not a production solution
 
 Requirements:
     pip install pgpy standard-imghdr requests python-dotenv
 
-Author: Gareth (for Paul's evaluation)
+Author: Educational demonstration only
 """
 
 import json
@@ -491,6 +494,10 @@ def decrypt_resource_secret_pgpy(secret_encrypted, user_key, passphrase, debug=F
 def example_usage():
     """
     Complete example showing PGPy-based Passbolt interaction with session key caching.
+    
+    WARNING: This is for educational purposes only. Do not use in production.
+    PGPy is not suitable for production use with Passbolt due to compatibility issues.
+    The session key caching will fail due to PGPy compatibility limitations.
     """
     if not PGPY_AVAILABLE:
         print("ERROR: PGPy not installed. Install with: pip install pgpy")
@@ -520,8 +527,11 @@ def example_usage():
         return
     
     print("=" * 60)
-    print("Passbolt PGPy Integration with Session Key Caching")
+    print("Passbolt PGPy Integration - LEARNING PURPOSES ONLY")
     print("=" * 60)
+    print("WARNING: This is for educational purposes only.")
+    print("DO NOT USE IN PRODUCTION - PGPy is not suitable for Passbolt.")
+    print("Session key caching will fail due to compatibility issues.")
     print()
     
     # Initialize session key cache
@@ -638,8 +648,9 @@ def example_usage():
                     print("PGPy only supports: MD5(1), SHA1(2), RIPEMD160(3), SHA256(8), SHA384(9), SHA512(10), SHA224(11)")
                     print("PGPy does NOT support SHA3-224(14) - this is why metadata key loading fails")
                     print()
-                    print("Session key caching implementation is complete and ready for production use")
-                    print("when used with compatible OpenPGP keys that don't use SHA3 algorithms")
+                    print("Session key caching implementation is incomplete and non-functional")
+                    print("PGPy is not suitable for production use with Passbolt")
+                    print("This is a learning demonstration only - do not use in production")
                 
         else:
             print(f"Failed to fetch metadata keys: {resp.status_code}")
@@ -654,8 +665,9 @@ def example_usage():
     print("Summary:")
     print("  • Authentication: ✓ (using PGPy)")
     print("  • Key decryption: ✓ (using PGPy)")
-    print("  • Session key caching: ✓ (performance optimization)")
+    print("  • Session key caching: ✗ (incomplete, non-functional)")
     print("  • No GPG binary required: ✓")
+    print("  • PRODUCTION READY: ✗ (learning purposes only)")
     print("=" * 60)
 
 

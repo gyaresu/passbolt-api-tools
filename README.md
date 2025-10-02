@@ -171,7 +171,7 @@ USER_ID=your-user-id-here
 # Optional: Passbolt server URL (default: https://passbolt.local)
 URL=https://passbolt.local
 
-# Optional: Path to GPG private key file (default: ada_private.key)
+# Optional: Path to GPG private key file (default: ada@passbolt.com.key)
 KEY_FILE=your_private.key
 
 # Optional: GPG key passphrase (default: ada@passbolt.com)

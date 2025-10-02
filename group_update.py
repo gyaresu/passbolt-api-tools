@@ -6,7 +6,7 @@ Uses JWT authentication and handles existing groups and admin status changes.
 Configuration is loaded from .env file with the following variables:
 - USER_ID: Your Passbolt user ID (required)
 - URL: Passbolt server URL (default: https://passbolt.local)
-- KEY_FILE: Path to GPG private key file (default: ada_private.key)
+- KEY_FILE: Path to GPG private key file (default: ada@passbolt.com.key)
 - PASSPHRASE: GPG key passphrase (default: ada@passbolt.com)
 - USER_EMAIL: Email of the user to add to the group (default: betty@passbolt.com)
 - GROUP_NAME: Name of the group to create/use (default: Test Group)
@@ -108,7 +108,7 @@ PASSBOLT_URL = os.getenv("URL", "https://passbolt.local")
 USER_ID = os.getenv("USER_ID", "8baca8bd-3bde-4ab6-96d6-f65492ce2791")  # Ada's user ID
 USER_EMAIL = os.getenv("USER_EMAIL", "betty@passbolt.com")  # User to add to group
 GROUP_NAME = os.getenv("GROUP_NAME", "Test Group")  # Group name
-PRIVATE_KEY_PATH = os.getenv("KEY_FILE", "ada_private.key")  # Your private key
+PRIVATE_KEY_PATH = os.getenv("KEY_FILE", "ada@passbolt.com.key")  # Your private key
 KEY_PASSPHRASE = os.getenv("PASSPHRASE", "ada@passbolt.com")  # Your passphrase
 USER_FPR = os.getenv("USER_FPR", "03F60E958F4CB29723ACDF761353B5B15D9B054F")  # Your fingerprint
 

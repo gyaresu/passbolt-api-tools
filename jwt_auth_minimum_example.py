@@ -16,7 +16,7 @@ API interactions.
 Configuration is loaded from .env file with the following variables:
 - USER_ID: Your Passbolt user ID (required)
 - URL: Passbolt server URL (default: https://passbolt.local)
-- KEY_FILE: Path to GPG private key file (default: ada_private.key)
+- KEY_FILE: Path to GPG private key file (default: ada@passbolt.com.key)
 - PASSPHRASE: GPG key passphrase (default: ada@passbolt.com)
 """
 
@@ -39,7 +39,7 @@ load_dotenv()
 # Configuration values from environment variables
 API_URL = os.getenv('URL', 'https://passbolt.local')
 USER_ID = os.getenv('USER_ID')
-PRIVATE_KEY_PATH = os.getenv('KEY_FILE', 'ada_private.key')
+PRIVATE_KEY_PATH = os.getenv('KEY_FILE', 'ada@passbolt.com.key')
 KEY_PASSPHRASE = os.getenv('PASSPHRASE', 'ada@passbolt.com')
 
 # ============================================================================
